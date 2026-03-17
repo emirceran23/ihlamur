@@ -7,7 +7,8 @@ load_dotenv()
 TRADEPLUS_URL = "https://tradeplus.com.tr"
 TRADEPLUS_TC = os.getenv("TRADEPLUS_TC", "")
 TRADEPLUS_PASSWORD = os.getenv("TRADEPLUS_PASSWORD", "")
-TRADEPLUS_ACCOUNT_NO = os.getenv("TRADEPLUS_ACCOUNT_NO", "")
+TRADEPLUS_ACCOUNT_NO = os.getenv("TRADEPLUS_ACCOUNT_NO", "")  # Müşteri No
+TRADEPLUS_PHONE = os.getenv("TRADEPLUS_PHONE", "")             # Kayıtlı cep tel (905xxxxxxxxx)
 
 # ── Browser ────────────────────────────────────────────────
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
