@@ -9,7 +9,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from config.settings import TRADEPLUS_URL, TRADEPLUS_TC, TRADEPLUS_PASSWORD, PHONE_VERIFICATION_TIMEOUT, PHONE_VERIFICATION_CHECK_INTERVAL
 from utils.logger import get_logger
-from utils.helpers import take_screenshot, retry
+from utils.helpers import take_screenshot, retry, send_telegram_message
 
 log = get_logger(__name__)
 
@@ -35,6 +35,10 @@ class Auth:
         self.driver.get(TRADEPLUS_URL)
         time.sleep(3)  # sayfanın tam yüklenmesini bekle
 
+        # Login sayfası screenshot'ını Telegram'a gönder
+        take_screenshot(self.driver, "🔐 Login sayfası yüklendi")
+        send_telegram_message("🔐 TradePlus login sayfası açıldı, giriş başlıyor...")
+
         try:
             # ── Adım 1: TC Kimlik No girişi ──────────────────────
             # NOT: Selector'lar TradePlus arayüzüne göre güncellenmeli
@@ -58,7 +62,7 @@ class Auth:
                 tc_input.send_keys(TRADEPLUS_TC)
                 log.info("TC Kimlik No girildi.")
             else:
-                take_screenshot(self.driver, "login_tc_not_found")
+                take_screenshot(self.driver, "❌ TC alanı bulunamadı")
                 raise Exception("TC Kimlik No alanı bulunamadı!")
 
             # ── Adım 2: Şifre girişi ─────────────────────────────
@@ -79,10 +83,12 @@ class Auth:
                 password_input.send_keys(TRADEPLUS_PASSWORD)
                 log.info("Şifre girildi.")
             else:
-                take_screenshot(self.driver, "login_password_not_found")
+                take_screenshot(self.driver, "❌ Şifre alanı bulunamadı")
                 raise Exception("Şifre alanı bulunamadı!")
 
             # ── Adım 3: Giriş butonuna tıkla ─────────────────────
+            take_screenshot(self.driver, "📝 TC ve şifre girildi")
+
             login_btn = self._find_element(
                 possible_selectors=[
                     (By.ID, "loginButton"),
@@ -100,11 +106,19 @@ class Auth:
                 login_btn.click()
                 log.info("Giriş butonuna tıklandı.")
             else:
-                take_screenshot(self.driver, "login_button_not_found")
+                take_screenshot(self.driver, "❌ Giriş butonu bulunamadı")
                 raise Exception("Giriş butonu bulunamadı!")
 
+            time.sleep(2)
+
             # ── Adım 4: Telefon doğrulaması bekleme ──────────────
-            take_screenshot(self.driver, "before_phone_verification")
+            take_screenshot(self.driver, "📞 Telefon doğrulaması bekleniyor")
+            send_telegram_message(
+                "📞 <b>TELEFON DOĞRULAMASI BEKLENİYOR!</b>\n\n"
+                "Çağrı merkezi seni arayacak.\n"
+                "Aramayı cevaplayıp doğrulama yap.\n"
+                f"⏱ Maksimum bekleme: {PHONE_VERIFICATION_TIMEOUT} saniye"
+            )
             log.info("=" * 60)
             log.info("📞 TELEFON DOĞRULAMASI BEKLENİYOR!")
             log.info("   Çağrı merkezi sizi arayacak.")
@@ -113,18 +127,22 @@ class Auth:
             log.info("=" * 60)
 
             if not self._wait_for_phone_verification():
-                take_screenshot(self.driver, "phone_verification_timeout")
+                take_screenshot(self.driver, "❌ Doğrulama zaman aşımı")
+                send_telegram_message("❌ Telefon doğrulaması zaman aşımına uğradı! (120s)")
                 raise Exception("Telefon doğrulaması zaman aşımına uğradı!")
 
             # ── Adım 5: Giriş sonrası doğrulama ──────────────────
             time.sleep(3)
             self._verify_login()
             self.is_logged_in = True
+            take_screenshot(self.driver, "✅ Giriş başarılı")
+            send_telegram_message("✅ TradePlus'a başarıyla giriş yapıldı!")
             log.info("✅ TradePlus'a başarıyla giriş yapıldı!")
             return True
 
         except Exception as e:
-            take_screenshot(self.driver, "login_error")
+            take_screenshot(self.driver, f"❌ Login hatası: {str(e)[:40]}")
+            send_telegram_message(f"❌ TradePlus giriş hatası:\n<code>{e}</code>")
             log.error(f"Giriş başarısız: {e}")
             raise
 
@@ -232,10 +250,11 @@ class Auth:
             except Exception:
                 pass
             
-            # Her 15 saniyede bir durum bilgisi ver
-            if elapsed % 15 == 0:
+            # Her 30 saniyede bir durum bilgisi ver (Telegram'a da)
+            if elapsed % 30 == 0:
                 log.info(f"⏳ Telefon doğrulaması bekleniyor... ({elapsed}/{PHONE_VERIFICATION_TIMEOUT}s)")
-                take_screenshot(self.driver, f"phone_verify_{elapsed}s")
+                take_screenshot(self.driver, f"⏳ Doğrulama bekleniyor ({elapsed}s)")
+                send_telegram_message(f"⏳ Hâlâ bekleniyor... ({elapsed}/{PHONE_VERIFICATION_TIMEOUT}s)\nTelefonu cevapla!")
         
         log.error(f"❌ Telefon doğrulaması {PHONE_VERIFICATION_TIMEOUT}s içinde tamamlanamadı!")
         return False
