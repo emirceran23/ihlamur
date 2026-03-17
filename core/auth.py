@@ -102,10 +102,14 @@ class Auth:
             log.info("Bireysel tabına tıklanıyor...")
             bireysel_tab = self._find_element(
                 possible_selectors=[
-                    (By.XPATH, "//button[text()='Bireysel']"),
-                    (By.XPATH, "//span[text()='Bireysel']/.."),
-                    (By.XPATH, "//*[contains(@class, 'MuiTab')][contains(text(), 'Bireysel')]"),
-                    (By.XPATH, "//button[contains(text(), 'Bireysel')]"),
+                    # role="tab" olan ikinci buton (Bireysel)
+                    (By.CSS_SELECTOR, "[role='tablist'] [role='tab']:nth-child(2)"),
+                    (By.XPATH, "(//button[@role='tab'])[2]"),
+                    # Metin içeren
+                    (By.XPATH, "//button[@role='tab'][.//text()[contains(.,'Bireysel')]]"),
+                    (By.XPATH, "//button[contains(@class, 'MuiTab')][2]"),
+                    # data-testid tabList içindeki ikinci tab
+                    (By.CSS_SELECTOR, "[data-testid='tabList'] button:nth-child(2)"),
                 ],
                 description="Bireysel tabı",
                 timeout=5,
@@ -115,21 +119,20 @@ class Auth:
                 bireysel_tab.click()
                 log.info("✅ Bireysel tabına tıklandı.")
                 time.sleep(2)
+                take_screenshot(self.driver, "🔐 Bireysel login formu")
+                send_telegram_message("🔐 Bireysel login formu açıldı, bilgiler giriliyor...")
             else:
-                log.warning("Bireysel tabı bulunamadı, zaten seçili olabilir.")
-
-            take_screenshot(self.driver, "🔐 Bireysel login formu")
-            send_telegram_message("🔐 Bireysel login formu açıldı, bilgiler giriliyor...")
+                take_screenshot(self.driver, "⚠️ Bireysel tabı bulunamadı")
+                send_telegram_message("⚠️ Bireysel tabı bulunamadı!")
+                raise Exception("Bireysel tabı bulunamadı!")
 
             # ── Adım 1: Müşteri No girişi ────────────────────────
             log.info("Müşteri No giriliyor...")
             musteri_input = self._find_element(
                 possible_selectors=[
-                    # "Müşteri No" label'ına sahip input
                     (By.XPATH, "//label[contains(text(), 'Müşteri')]/following-sibling::div//input"),
                     (By.XPATH, "//label[contains(text(), 'Müşteri No')]/../..//input"),
                     (By.XPATH, "(//input[@type='text' or @type='tel' or @type='number'])[1]"),
-                    # MUI form içindeki ilk input
                     (By.CSS_SELECTOR, ".MuiDialog-root input:first-of-type"),
                     (By.CSS_SELECTOR, ".MuiModal-root input:first-of-type"),
                     (By.CSS_SELECTOR, "[role='dialog'] input:first-of-type"),
@@ -138,8 +141,7 @@ class Auth:
             )
 
             if musteri_input:
-                musteri_input.clear()
-                musteri_input.send_keys(TRADEPLUS_ACCOUNT_NO)
+                self._safe_input(musteri_input, TRADEPLUS_ACCOUNT_NO)
                 log.info(f"Müşteri No girildi: {TRADEPLUS_ACCOUNT_NO[:3]}***")
             else:
                 take_screenshot(self.driver, "❌ Müşteri No alanı bulunamadı")
@@ -160,8 +162,7 @@ class Auth:
             )
 
             if password_input:
-                password_input.clear()
-                password_input.send_keys(TRADEPLUS_PASSWORD)
+                self._safe_input(password_input, TRADEPLUS_PASSWORD)
                 log.info("Şifre girildi.")
             else:
                 take_screenshot(self.driver, "❌ Şifre alanı bulunamadı")
@@ -182,8 +183,7 @@ class Auth:
             )
 
             if phone_input:
-                phone_input.clear()
-                phone_input.send_keys(TRADEPLUS_PHONE)
+                self._safe_input(phone_input, TRADEPLUS_PHONE)
                 log.info(f"Cep telefonu girildi: {TRADEPLUS_PHONE[:5]}*****")
             else:
                 take_screenshot(self.driver, "❌ Telefon alanı bulunamadı")
@@ -220,8 +220,7 @@ class Auth:
             )
 
             if captcha_input:
-                captcha_input.clear()
-                captcha_input.send_keys(captcha_code)
+                self._safe_input(captcha_input, captcha_code)
                 log.info(f"CAPTCHA kodu girildi: {captcha_code}")
             else:
                 take_screenshot(self.driver, "❌ CAPTCHA alanı bulunamadı")
@@ -360,6 +359,38 @@ class Auth:
         if len(debug_msg) > 4000:
             debug_msg = debug_msg[:4000] + "\n...(kesildi)"
         send_telegram_message(debug_msg)
+
+    def _safe_input(self, element, text: str):
+        """
+        MUI input'lara güvenli şekilde değer girer.
+        clear() bazen 'invalid element state' hatası verir,
+        bu yüzden JavaScript ile temizleyip yazıyoruz.
+        """
+        try:
+            # Önce elemente tıkla (focus ver)
+            element.click()
+            time.sleep(0.3)
+        except Exception:
+            pass
+
+        try:
+            # JavaScript ile mevcut değeri temizle
+            self.driver.execute_script("arguments[0].value = '';", element)
+            # React state'ini tetiklemek için input event gönder
+            self.driver.execute_script("""
+                var el = arguments[0];
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, '');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            """, element)
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+        # send_keys ile yaz
+        element.send_keys(text)
 
     def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
         """
