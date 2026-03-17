@@ -74,12 +74,8 @@ class Auth:
             log.info("Müşteri No giriliyor...")
             musteri_input = self._find_element(
                 possible_selectors=[
-                    (By.ID, "txtCustNum"),
-                    (By.NAME, "txtCustNum"),
-                    (By.CSS_SELECTOR, "input[name='txtCustNum']"),
-                    (By.XPATH, "//input[contains(@id, 'CustNum')]"),
-                    (By.XPATH, "//input[contains(@id, 'Musteri')]"),
-                    (By.XPATH, "//td[contains(text(), 'Müşteri')]/following-sibling::td//input"),
+                    (By.ID, "IntUserName"),
+                    (By.NAME, "IntUserName"),
                 ],
                 description="Müşteri No",
                 timeout=10,
@@ -94,38 +90,17 @@ class Auth:
                 take_screenshot(self.driver, "❌ Müşteri No alanı bulunamadı")
                 raise Exception("Müşteri No alanı bulunamadı!")
 
-            # ── Adım 2: Şifre ────────────────────────────────────
-            log.info("Şifre giriliyor...")
-            password_input = self._find_element(
-                possible_selectors=[
-                    (By.ID, "txtPass"),
-                    (By.NAME, "txtPass"),
-                    (By.CSS_SELECTOR, "input[type='password']"),
-                    (By.XPATH, "//input[contains(@id, 'Pass')]"),
-                    (By.XPATH, "//td[contains(text(), 'Şifre')]/following-sibling::td//input"),
-                ],
-                description="Şifre",
-            )
-
-            if password_input:
-                password_input.clear()
-                password_input.send_keys(KUVEYTTURK_PASSWORD)
-                log.info("Şifre girildi.")
-                take_screenshot(self.driver, "✅ Şifre girildi")
-            else:
-                take_screenshot(self.driver, "❌ Şifre alanı bulunamadı")
-                raise Exception("Şifre alanı bulunamadı!")
+            # ── Adım 2: Şifre (sanal klavye ile) ─────────────────
+            log.info("Şifre giriliyor (sanal klavye)...")
+            self._type_password_virtual_keyboard(KUVEYTTURK_PASSWORD)
+            take_screenshot(self.driver, "✅ Şifre girildi")
 
             # ── Adım 3: Kayıtlı Cep Telefonu ─────────────────────
             log.info("Cep telefonu giriliyor...")
             phone_input = self._find_element(
                 possible_selectors=[
-                    (By.ID, "txtGsm"),
-                    (By.NAME, "txtGsm"),
-                    (By.CSS_SELECTOR, "input[name='txtGsm']"),
-                    (By.XPATH, "//input[contains(@id, 'Gsm')]"),
-                    (By.XPATH, "//input[contains(@id, 'gsm')]"),
-                    (By.XPATH, "//td[contains(text(), 'Telefon')]/following-sibling::td//input"),
+                    (By.ID, "GsmNumber"),
+                    (By.NAME, "GsmNumber"),
                 ],
                 description="Cep Telefonu",
             )
@@ -153,13 +128,8 @@ class Auth:
 
             captcha_input = self._find_element(
                 possible_selectors=[
-                    (By.ID, "txtSecurityCode"),
-                    (By.NAME, "txtSecurityCode"),
-                    (By.CSS_SELECTOR, "input[name='txtSecurityCode']"),
-                    (By.XPATH, "//input[contains(@id, 'Security')]"),
-                    (By.XPATH, "//input[contains(@id, 'security')]"),
-                    (By.XPATH, "//input[contains(@id, 'captcha')]"),
-                    (By.XPATH, "//td[contains(text(), 'Doğrulama')]/following-sibling::td//input"),
+                    (By.ID, "Captcha"),
+                    (By.NAME, "Captcha"),
                 ],
                 description="CAPTCHA / Doğrulama Resmi",
             )
@@ -177,13 +147,9 @@ class Auth:
             log.info("DEVAM butonuna tıklanıyor...")
             devam_btn = self._find_element(
                 possible_selectors=[
-                    (By.ID, "btnDevam"),
-                    (By.ID, "btnLogin"),
-                    (By.CSS_SELECTOR, "input[value='DEVAM']"),
-                    (By.CSS_SELECTOR, "button[value='DEVAM']"),
-                    (By.XPATH, "//input[@value='DEVAM']"),
-                    (By.XPATH, "//button[contains(text(), 'DEVAM')]"),
-                    (By.XPATH, "//input[contains(@id, 'btn')][@type='submit']"),
+                    (By.ID, "btnSubmit"),
+                    (By.CSS_SELECTOR, "input#btnSubmit"),
+                    (By.XPATH, "//input[@id='btnSubmit']"),
                 ],
                 description="DEVAM butonu",
             )
@@ -250,6 +216,54 @@ class Auth:
     # ──────────────────────────────────────────────────────────
     #  YARDIMCI METODLAR
     # ──────────────────────────────────────────────────────────
+    def _type_password_virtual_keyboard(self, password: str):
+        """
+        Sanal klavye butonlarına tıklayarak şifre girer.
+        KuveytTürk sanal klavyesi: butonlar id=M0..M43 ile sıralı,
+        her butonun text'i bir karakter. Karakter-buton eşleştirmesi
+        yapılarak şifrenin her karakteri tek tek tıklanır.
+        """
+        # Önce Password alanına tıkla — sanal klavyeyi aktifleştir
+        try:
+            pw_field = self.driver.find_element(By.ID, "Password")
+            pw_field.click()
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        # Sanal klavye butonlarını topla: text → element mapping
+        keyboard_buttons = {}
+        for i in range(50):  # M0 ... M49 arası tara
+            try:
+                btn = self.driver.find_element(By.ID, f"M{i}")
+                char = btn.text.strip()
+                if char:
+                    keyboard_buttons[char.lower()] = btn
+            except Exception:
+                continue
+
+        log.info(f"Sanal klavyede {len(keyboard_buttons)} tuş bulundu: {list(keyboard_buttons.keys())}")
+
+        if not keyboard_buttons:
+            # Sanal klavye bulunamadı — direkt send_keys dene
+            log.warning("Sanal klavye bulunamadı, send_keys deneniyor...")
+            pw_field = self.driver.find_element(By.ID, "Password")
+            pw_field.send_keys(password)
+            return
+
+        # Şifrenin her karakteri için ilgili butona tıkla
+        for ch in password:
+            ch_lower = ch.lower()
+            if ch_lower in keyboard_buttons:
+                keyboard_buttons[ch_lower].click()
+                time.sleep(0.15)
+                log.debug(f"Sanal klavye: '{ch_lower}' tıklandı")
+            else:
+                log.warning(f"Sanal klavyede '{ch}' bulunamadı! Mevcut tuşlar: {list(keyboard_buttons.keys())}")
+                raise Exception(f"Sanal klavyede '{ch}' karakteri yok!")
+
+        log.info(f"Şifre sanal klavye ile girildi ({len(password)} karakter)")
+
     def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
         """Birden fazla selector ile element bulmayı dener."""
         for by, value in possible_selectors:
