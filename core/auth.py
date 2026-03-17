@@ -363,34 +363,47 @@ class Auth:
     def _safe_input(self, element, text: str):
         """
         MUI input'lara güvenli şekilde değer girer.
-        clear() bazen 'invalid element state' hatası verir,
-        bu yüzden JavaScript ile temizleyip yazıyoruz.
+        Önce JS ile focus + clear, sonra JS ile değer set eder,
+        en son React state'ini senkronize eder.
         """
+        # 1. Scroll into view + focus
         try:
-            # Önce elemente tıkla (focus ver)
-            element.click()
+            self.driver.execute_script("""
+                arguments[0].scrollIntoView({block: 'center'});
+                arguments[0].focus();
+            """, element)
             time.sleep(0.3)
         except Exception:
             pass
 
+        # 2. Tıkla (JS ile — intercepted hatasını önler)
         try:
-            # JavaScript ile mevcut değeri temizle
-            self.driver.execute_script("arguments[0].value = '';", element)
-            # React state'ini tetiklemek için input event gönder
-            self.driver.execute_script("""
-                var el = arguments[0];
-                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(el, '');
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            """, element)
-            time.sleep(0.2)
+            self.driver.execute_script("arguments[0].click();", element)
+            time.sleep(0.3)
         except Exception:
             pass
 
-        # send_keys ile yaz
-        element.send_keys(text)
+        # 3. Mevcut değeri temizle + yeni değeri yaz (JS ile — interactable hatasını önler)
+        try:
+            self.driver.execute_script("""
+                var el = arguments[0];
+                var text = arguments[1];
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, text);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+            """, element, text)
+            time.sleep(0.3)
+        except Exception as e:
+            log.warning(f"JS input hatası: {e}, send_keys deneniyor...")
+            # Fallback: normal send_keys
+            try:
+                element.clear()
+            except Exception:
+                pass
+            element.send_keys(text)
 
     def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
         """
