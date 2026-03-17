@@ -98,20 +98,28 @@ class Auth:
                 send_telegram_message("⚠️ Profil ikonu bulunamadı! Debug bilgileri yukarıda.")
                 raise Exception("Profil/Account ikonu bulunamadı!")
 
-            # ── Adım 0.5: "Bireysel" tabının seçili olduğundan emin ol ──
-            try:
-                bireysel_tab = self.driver.find_element(
-                    By.XPATH, "//button[contains(text(), 'Bireysel')] | //span[contains(text(), 'Bireysel')]/.."
-                )
-                if bireysel_tab:
-                    bireysel_tab.click()
-                    time.sleep(1)
-                    log.info("Bireysel tabı seçildi.")
-            except Exception:
-                log.debug("Bireysel tabı zaten seçili veya bulunamadı.")
+            # ── Adım 0.5: "Bireysel" tabına tıkla ─────────────────
+            log.info("Bireysel tabına tıklanıyor...")
+            bireysel_tab = self._find_element(
+                possible_selectors=[
+                    (By.XPATH, "//button[text()='Bireysel']"),
+                    (By.XPATH, "//span[text()='Bireysel']/.."),
+                    (By.XPATH, "//*[contains(@class, 'MuiTab')][contains(text(), 'Bireysel')]"),
+                    (By.XPATH, "//button[contains(text(), 'Bireysel')]"),
+                ],
+                description="Bireysel tabı",
+                timeout=5,
+            )
 
-            take_screenshot(self.driver, "🔐 Login formu açıldı")
-            send_telegram_message("🔐 Login formu açıldı, bilgiler giriliyor...")
+            if bireysel_tab:
+                bireysel_tab.click()
+                log.info("✅ Bireysel tabına tıklandı.")
+                time.sleep(2)
+            else:
+                log.warning("Bireysel tabı bulunamadı, zaten seçili olabilir.")
+
+            take_screenshot(self.driver, "🔐 Bireysel login formu")
+            send_telegram_message("🔐 Bireysel login formu açıldı, bilgiler giriliyor...")
 
             # ── Adım 1: Müşteri No girişi ────────────────────────
             log.info("Müşteri No giriliyor...")
