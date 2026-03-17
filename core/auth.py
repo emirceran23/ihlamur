@@ -55,8 +55,14 @@ class Auth:
                     (By.CSS_SELECTOR, "[class*='Avatar']"),
                     (By.XPATH, "//div[contains(@class, 'MuiAvatar')]"),
                     (By.CSS_SELECTOR, "header .MuiIconButton-root:last-child"),
+                    # SVG ikon olabilir (PersonIcon vs)
+                    (By.XPATH, "//header//button[last()]"),
+                    (By.XPATH, "//nav//button[last()]"),
+                    (By.CSS_SELECTOR, "svg[data-testid='PersonIcon']"),
+                    (By.XPATH, "//*[contains(@class, 'MuiSvgIcon')]/ancestor::button"),
                 ],
                 description="Profil/Account ikonu",
+                timeout=3,
             )
 
             if account_icon:
@@ -64,9 +70,12 @@ class Auth:
                 log.info("Profil ikonuna tıklandı.")
                 time.sleep(3)
             else:
+                # Bulunamadı — sayfayı keşfet ve Telegram'a gönder
+                log.warning("Profil ikonu bulunamadı! Sayfa elementleri keşfediliyor...")
+                self._debug_page_elements()
                 take_screenshot(self.driver, "⚠️ Profil ikonu bulunamadı")
-                send_telegram_message("⚠️ Profil ikonu bulunamadı!")
-                log.warning("Profil ikonu bulunamadı!")
+                send_telegram_message("⚠️ Profil ikonu bulunamadı! Element listesi yukarıda.")
+                raise Exception("Profil/Account ikonu bulunamadı! Debug bilgileri Telegram'a gönderildi.")
 
             # ── Adım 0.5: "Bireysel" tabının seçili olduğundan emin ol ──
             try:
@@ -243,19 +252,93 @@ class Auth:
             log.error(f"Giriş başarısız: {e}")
             raise
 
-    def _find_element(self, possible_selectors: list, description: str):
+    def _debug_page_elements(self):
+        """
+        Sayfadaki tüm önemli elementleri loglar ve Telegram'a gönderir.
+        Profil ikonu gibi elementleri bulmak için kullanılır.
+        """
+        debug_msg = "🔍 <b>Sayfa Elementleri:</b>\n\n"
+
+        # Tüm butonları listele
+        buttons = self.driver.find_elements(By.TAG_NAME, "button")
+        debug_msg += f"<b>Butonlar ({len(buttons)}):</b>\n"
+        for i, btn in enumerate(buttons):
+            try:
+                text = btn.text[:30] if btn.text else ""
+                cls = btn.get_attribute("class") or ""
+                aria = btn.get_attribute("aria-label") or ""
+                visible = btn.is_displayed()
+                if visible:
+                    line = f"[{i}] text='{text}' aria='{aria}' class={cls[:60]}"
+                    log.info(f"  Buton {line}")
+                    debug_msg += f"<code>{line}</code>\n"
+            except Exception:
+                pass
+
+        # Tüm SVG ikonlarını listele
+        svgs = self.driver.find_elements(By.TAG_NAME, "svg")
+        debug_msg += f"\n<b>SVG'ler ({len(svgs)}):</b>\n"
+        for i, svg in enumerate(svgs):
+            try:
+                testid = svg.get_attribute("data-testid") or ""
+                cls = svg.get_attribute("class") or ""
+                parent_tag = svg.find_element(By.XPATH, "..").tag_name
+                parent_cls = svg.find_element(By.XPATH, "..").get_attribute("class") or ""
+                if testid or "Icon" in cls:
+                    line = f"[{i}] testid='{testid}' class={cls[:40]} parent=<{parent_tag} class={parent_cls[:40]}>"
+                    log.info(f"  SVG {line}")
+                    debug_msg += f"<code>{line}</code>\n"
+            except Exception:
+                pass
+
+        # MuiIconButton'ları listele
+        icon_btns = self.driver.find_elements(By.CSS_SELECTOR, "[class*='MuiIconButton']")
+        debug_msg += f"\n<b>IconButton'lar ({len(icon_btns)}):</b>\n"
+        for i, ib in enumerate(icon_btns):
+            try:
+                cls = ib.get_attribute("class") or ""
+                aria = ib.get_attribute("aria-label") or ""
+                inner = ib.get_attribute("innerHTML")[:100] if ib.get_attribute("innerHTML") else ""
+                visible = ib.is_displayed()
+                if visible:
+                    line = f"[{i}] aria='{aria}' class={cls[:60]}"
+                    log.info(f"  IconBtn {line}")
+                    debug_msg += f"<code>{line}</code>\n"
+            except Exception:
+                pass
+
+        # img ve a etiketleri (header'daki)
+        imgs = self.driver.find_elements(By.CSS_SELECTOR, "header img, nav img, [class*='header'] img")
+        debug_msg += f"\n<b>Header img'leri ({len(imgs)}):</b>\n"
+        for i, img in enumerate(imgs):
+            try:
+                src = img.get_attribute("src") or ""
+                alt = img.get_attribute("alt") or ""
+                line = f"[{i}] alt='{alt}' src={src[:60]}"
+                log.info(f"  Img {line}")
+                debug_msg += f"<code>{line}</code>\n"
+            except Exception:
+                pass
+
+        # Mesajı Telegram'a gönder (çok uzunsa kes)
+        if len(debug_msg) > 4000:
+            debug_msg = debug_msg[:4000] + "\n...(kesildi)"
+        send_telegram_message(debug_msg)
+
+    def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
         """
         Birden fazla selector ile element bulmayı dener.
-        TradePlus arayüz değişikliklerinde esnek kalır.
+        Kısa timeout ile hızlıca deneyip geçer.
         """
         for by, value in possible_selectors:
             try:
-                element = self.wait.until(
+                element = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((by, value))
                 )
-                log.debug(f"{description} bulundu: {by}={value}")
+                log.info(f"✅ {description} bulundu: {by}={value}")
                 return element
             except TimeoutException:
+                log.debug(f"  ❌ {description}: {by}={value} bulunamadı")
                 continue
         log.warning(f"{description} hiçbir selector ile bulunamadı!")
         return None
