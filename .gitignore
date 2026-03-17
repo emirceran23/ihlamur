@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Environment Variables
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Selenium
+geckodriver.log
+chromedriver.log
+screenshots/
+*.png
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
