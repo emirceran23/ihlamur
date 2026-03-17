@@ -54,22 +54,19 @@ class Auth:
             log.info("Profil ikonuna tıklanıyor...")
             account_icon = self._find_element(
                 possible_selectors=[
-                    # Avatar bileşeni (yuvarlak profil ikonu)
-                    (By.CSS_SELECTOR, ".MuiAvatar-root"),
-                    (By.XPATH, "//div[contains(@class, 'MuiAvatar')]"),
-                    # Avatar'ı içeren buton
-                    (By.XPATH, "//button[.//div[contains(@class, 'Avatar')]]"),
-                    (By.XPATH, "//button[.//svg[contains(@class, 'Avatar')]]"),
-                    # PersonIcon SVG'si
-                    (By.CSS_SELECTOR, "svg[data-testid='PersonIcon']"),
-                    (By.XPATH, "//button[.//svg[@data-testid='PersonIcon']]"),
-                    (By.XPATH, "//button[.//svg[@data-testid='AccountCircleIcon']]"),
-                    # Person/Account path içeren SVG'nin parent butonu
-                    (By.XPATH, "//button[.//svg[contains(@data-testid, 'Person')]]"),
-                    (By.XPATH, "//button[.//svg[contains(@data-testid, 'Account')]]"),
+                    # Spesifik: SVG id="Component_80_1" içeren buton
+                    (By.XPATH, "//button[.//svg[@id='Component_80_1']]"),
+                    (By.XPATH, "//button[.//svg[contains(@data-name, 'Component 80')]]"),
+                    # jss128 div'ini içeren buton
+                    (By.XPATH, "//button[.//div[contains(@class, 'jss128')]]"),
+                    # jss127 class'ına sahip buton
+                    (By.CSS_SELECTOR, "button.jss127"),
+                    # Component_80 SVG'sinin parent butonu
+                    (By.CSS_SELECTOR, "#Component_80_1"),
+                    (By.XPATH, "//*[@id='Component_80_1']/ancestor::button"),
                 ],
                 description="Profil/Account ikonu",
-                timeout=3,
+                timeout=5,
             )
 
             if account_icon:
