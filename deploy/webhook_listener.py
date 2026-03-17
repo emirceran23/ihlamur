@@ -82,8 +82,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(str(e).encode())
 
     def _verify_signature(self, payload: bytes, signature: str) -> bool:
-        if not signature:
-            return True  # Secret ayarlanmamışsa geç
+        # Secret ayarlanmamışsa veya imza gelmemişse geç
+        if not WEBHOOK_SECRET or not signature:
+            return True
         expected = "sha256=" + hmac.new(
             WEBHOOK_SECRET.encode(), payload, hashlib.sha256
         ).hexdigest()
