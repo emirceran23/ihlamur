@@ -52,12 +52,14 @@ def main():
         # ── Keşif Modu ────────────────────────────────────────
         if args.action == "explore":
             log.info("Keşif modu: TradePlus sayfa yapısı inceleniyor...")
-            driver.get("https://tradeplus.kuveytturk.com.tr")
+            from config.settings import TRADEPLUS_URL
             import time
 
+            driver.get(TRADEPLUS_URL)
+
             # Sayfanın tam render olmasını bekle
-            log.info("Sayfa yükleniyor, 10 saniye bekleniyor...")
-            time.sleep(10)
+            log.info("Sayfa yükleniyor, 15 saniye bekleniyor...")
+            time.sleep(15)
 
             # Debug bilgileri
             log.info(f"URL: {driver.current_url}")
