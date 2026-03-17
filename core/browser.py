@@ -50,23 +50,17 @@ class Browser:
         )
 
         try:
-            # Selenium 4.27 kendi ChromeDriver'ını otomatik yönetir
-            # Binary yollarını dene
-            for binary in [
-                "/opt/google/chrome/google-chrome",
-                "/usr/bin/google-chrome",
-                "/usr/bin/google-chrome-stable",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/chromium",
-                "/snap/bin/chromium",
-            ]:
-                if os.path.exists(binary):
-                    options.binary_location = binary
-                    log.info(f"Chrome binary: {binary}")
-                    break
+            # Chrome binary: /opt/google/chrome/chrome (gerçek binary, wrapper değil)
+            # ChromeDriver: /usr/local/bin/chromedriver (Chrome sürümüyle eşleşen)
+            CHROME_BINARY = "/opt/google/chrome/chrome"
+            CHROMEDRIVER_PATH = "/usr/local/bin/chromedriver"
 
-            self.driver = webdriver.Chrome(options=options)
-            log.info("Chrome başlatıldı (Selenium otomatik driver yönetimi).")
+            options.binary_location = CHROME_BINARY
+            log.info(f"Chrome binary: {CHROME_BINARY}")
+
+            service = Service(CHROMEDRIVER_PATH)
+            self.driver = webdriver.Chrome(service=service, options=options)
+            log.info("Chrome başarıyla başlatıldı!")
 
             self.driver.implicitly_wait(IMPLICIT_WAIT)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)

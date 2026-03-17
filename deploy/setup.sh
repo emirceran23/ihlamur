@@ -15,10 +15,20 @@ apt-get install -y python3-venv git wget curl unzip
 
 # ── 1b. Google Chrome kur (snap chromium sürüm sorunu yapar) ──
 echo "🌐 Google Chrome kuruluyor..."
+apt-get install -y unzip wget
 wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 apt-get install -y /tmp/chrome.deb || apt-get -f install -y
 rm -f /tmp/chrome.deb
 echo "✅ Chrome sürümü: $(google-chrome-stable --version)"
+
+# ── 1c. Eşleşen ChromeDriver kur ──────────────────────────
+echo "🔧 ChromeDriver kuruluyor..."
+CHROME_VER=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip" -O /tmp/cd.zip
+unzip -o /tmp/cd.zip -d /tmp/
+mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+chmod +x /usr/local/bin/chromedriver
+echo "✅ ChromeDriver sürümü: $(/usr/local/bin/chromedriver --version)"
 
 # ── 2. Python venv ────────────────────────────────────────
 echo "🐍 Python venv oluşturuluyor..."
