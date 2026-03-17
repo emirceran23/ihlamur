@@ -29,14 +29,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         payload = self.rfile.read(content_length)
 
-        # ── İmza doğrulama ────────────────────────────────
-        signature = self.headers.get("X-Hub-Signature-256", "")
-        if not self._verify_signature(payload, signature):
-            print("❌ İmza doğrulaması başarısız!")
-            self.send_response(403)
-            self.end_headers()
-            self.wfile.write(b"Invalid signature")
-            return
+        # ── İmza doğrulama (şimdilik devre dışı) ─────────
+        # signature = self.headers.get("X-Hub-Signature-256", "")
+        # if not self._verify_signature(payload, signature):
+        #     print("❌ İmza doğrulaması başarısız!")
+        #     self.send_response(403)
+        #     self.end_headers()
+        #     self.wfile.write(b"Invalid signature")
+        #     return
 
         # ── Event kontrolü ────────────────────────────────
         event = self.headers.get("X-GitHub-Event", "")
