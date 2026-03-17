@@ -1,5 +1,17 @@
 """
-KuveytTürk TradePlus Giriş / Çıkış modülü.
+KuveytTürk İnternet Şubesi — Giriş / Çıkış modülü.
+
+Akış:
+  1. isube.kuveytturk.com.tr/Login/InitialLogin aç
+  2. "Önemli Bilgilendirme" popup → TAMAM tıkla
+  3. Müşteri No / T.C. Kimlik No gir
+  4. Şifre gir
+  5. Kayıtlı Cep Telefonu gir
+  6. CAPTCHA → Telegram'a gönder, kullanıcıdan kodu al
+  7. Doğrulama Resmi gir
+  8. DEVAM tıkla
+  9. Mobil onay bekle (telefon onay + bayrak seçimi)
+ 10. Giriş doğrula
 """
 
 import time
@@ -8,8 +20,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from config.settings import (
-    TRADEPLUS_URL, TRADEPLUS_TC, TRADEPLUS_PASSWORD,
-    TRADEPLUS_ACCOUNT_NO, TRADEPLUS_PHONE,
+    KUVEYTTURK_URL, KUVEYTTURK_TC, KUVEYTTURK_PASSWORD,
+    KUVEYTTURK_PHONE,
     PHONE_VERIFICATION_TIMEOUT, PHONE_VERIFICATION_CHECK_INTERVAL,
 )
 from utils.logger import get_logger
@@ -19,151 +31,87 @@ log = get_logger(__name__)
 
 
 class Auth:
-    """TradePlus kimlik doğrulama işlemleri."""
+    """KuveytTürk İnternet Şubesi kimlik doğrulama."""
 
     def __init__(self, driver):
         self.driver = driver
         self.wait = WebDriverWait(driver, 15)
         self.is_logged_in = False
 
+    # ──────────────────────────────────────────────────────────
+    #  LOGIN
+    # ──────────────────────────────────────────────────────────
     @retry(max_attempts=2, delay=5.0)
     def login(self) -> bool:
-        """
-        TradePlus'a giriş yapar.
+        """KuveytTürk İnternet Şubesi'ne giriş yapar."""
+        log.info("KuveytTürk İnternet Şubesi'ne giriş yapılıyor...")
+        self.driver.get(KUVEYTTURK_URL)
+        time.sleep(4)
 
-        Form alanları (Bireysel tab):
-        1. Müşteri No
-        2. Şifre
-        3. Kayıtlı Cep Telefonu (90...)
-        4. CAPTCHA (görsel kod)
-        5. "İleri" butonu
-        6. Telefon doğrulaması (çağrı merkezi arar)
-        """
-        log.info("TradePlus'a giriş yapılıyor...")
-        self.driver.get(TRADEPLUS_URL)
-        time.sleep(5)
-
-        take_screenshot(self.driver, "🌐 TradePlus ana sayfa")
-        send_telegram_message("🌐 TradePlus ana sayfası açıldı...")
+        take_screenshot(self.driver, "🌐 İnternet Şubesi açıldı")
+        send_telegram_message("🌐 KuveytTürk İnternet Şubesi açıldı...")
 
         try:
-            # ── Adım 0: Profil ikonuna tıkla (login modal'ı aç) ──
-            log.info("Profil ikonuna tıklanıyor...")
-            account_icon = self._find_element(
-                possible_selectors=[
-                    # Spesifik: SVG id="Component_80_1" içeren buton
-                    (By.XPATH, "//button[.//svg[@id='Component_80_1']]"),
-                    (By.XPATH, "//button[.//svg[contains(@data-name, 'Component 80')]]"),
-                    # jss128 div'ini içeren buton
-                    (By.XPATH, "//button[.//div[contains(@class, 'jss128')]]"),
-                    # jss127 class'ına sahip buton
-                    (By.CSS_SELECTOR, "button.jss127"),
-                    # Component_80 SVG'sinin parent butonu
-                    (By.CSS_SELECTOR, "#Component_80_1"),
-                    (By.XPATH, "//*[@id='Component_80_1']/ancestor::button"),
-                ],
-                description="Profil/Account ikonu",
-                timeout=5,
-            )
+            # ── Adım 0: "Önemli Bilgilendirme" popup — TAMAM ─────
+            log.info("Popup kontrol ediliyor...")
+            try:
+                tamam_btn = WebDriverWait(self.driver, 8).until(
+                    EC.element_to_be_clickable((
+                        By.XPATH,
+                        "//button[contains(text(), 'TAMAM')] | "
+                        "//input[@value='TAMAM'] | "
+                        "//a[contains(text(), 'TAMAM')]"
+                    ))
+                )
+                tamam_btn.click()
+                log.info("✅ Popup kapatıldı (TAMAM)")
+                time.sleep(1)
+                take_screenshot(self.driver, "✅ Popup kapatıldı")
+            except TimeoutException:
+                log.info("Popup yok veya zaten kapalı, devam ediliyor...")
 
-            if account_icon:
-                account_icon.click()
-                log.info("Profil ikonuna tıklandı.")
-                time.sleep(3)
-                
-                # Login modal açıldı mı kontrol et
-                login_modal_open = False
-                try:
-                    modal = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.XPATH, 
-                            "//*[contains(text(), 'Müşteri No') or contains(text(), 'Bireysel') or contains(text(), 'Kurumsal')]"
-                        ))
-                    )
-                    if modal.is_displayed():
-                        login_modal_open = True
-                        log.info("✅ Login modal açıldı!")
-                except TimeoutException:
-                    pass
-
-                if not login_modal_open:
-                    take_screenshot(self.driver, "⚠️ Modal açılmadı - yanlış buton")
-                    send_telegram_message("⚠️ Tıklandı ama login modal açılmadı! Yanlış butona basılmış olabilir.")
-                    raise Exception("Login modal açılmadı! Profil ikonu yanlış tespit edilmiş.")
-            else:
-                log.warning("Profil ikonu bulunamadı!")
-                take_screenshot(self.driver, "⚠️ Profil ikonu bulunamadı")
-                send_telegram_message("⚠️ Profil ikonu bulunamadı! Debug bilgileri yukarıda.")
-                raise Exception("Profil/Account ikonu bulunamadı!")
-
-            # ── Adım 0.5: "Bireysel" tabına tıkla ─────────────────
-            log.info("Bireysel tabına tıklanıyor...")
-            bireysel_tab = self._find_element(
-                possible_selectors=[
-                    # Modal (dialog) içindeki ikinci tab
-                    (By.XPATH, "//div[contains(@class, 'MuiDialog')]//button[@role='tab'][2]"),
-                    (By.XPATH, "//div[contains(@class, 'MuiDialog')]//button[contains(text(), 'Bireysel')]"),
-                    (By.XPATH, "//div[contains(@class, 'MuiModal')]//button[@role='tab'][2]"),
-                    # data-testid tabList içindeki ikinci tab  
-                    (By.CSS_SELECTOR, "[data-testid='tabList'] [role='tab']:nth-child(2)"),
-                    # Bireysel text'i içeren herhangi bir tab
-                    (By.XPATH, "//button[@role='tab'][contains(.,'Bireysel')]"),
-                    (By.XPATH, "(//button[@role='tab'])[last()]"),
-                ],
-                description="Bireysel tabı",
-                timeout=5,
-            )
-
-            if bireysel_tab:
-                # Normal click yerine JavaScript click kullan
-                # (element click intercepted hatasını önler)
-                self.driver.execute_script("arguments[0].click();", bireysel_tab)
-                log.info("✅ Bireysel tabına tıklandı (JS click).")
-                time.sleep(2)
-                take_screenshot(self.driver, "🔐 Bireysel login formu")
-                send_telegram_message("🔐 Bireysel login formu açıldı, bilgiler giriliyor...")
-            else:
-                take_screenshot(self.driver, "⚠️ Bireysel tabı bulunamadı")
-                send_telegram_message("⚠️ Bireysel tabı bulunamadı!")
-                raise Exception("Bireysel tabı bulunamadı!")
-
-            # ── Adım 1: Müşteri No girişi ────────────────────────
+            # ── Adım 1: Müşteri No / T.C. Kimlik No ──────────────
             log.info("Müşteri No giriliyor...")
             musteri_input = self._find_element(
                 possible_selectors=[
-                    (By.XPATH, "//label[contains(text(), 'Müşteri')]/following-sibling::div//input"),
-                    (By.XPATH, "//label[contains(text(), 'Müşteri No')]/../..//input"),
-                    (By.XPATH, "(//input[@type='text' or @type='tel' or @type='number'])[1]"),
-                    (By.CSS_SELECTOR, ".MuiDialog-root input:first-of-type"),
-                    (By.CSS_SELECTOR, ".MuiModal-root input:first-of-type"),
-                    (By.CSS_SELECTOR, "[role='dialog'] input:first-of-type"),
+                    (By.ID, "txtCustNum"),
+                    (By.NAME, "txtCustNum"),
+                    (By.CSS_SELECTOR, "input[name='txtCustNum']"),
+                    (By.XPATH, "//input[contains(@id, 'CustNum')]"),
+                    (By.XPATH, "//input[contains(@id, 'Musteri')]"),
+                    (By.XPATH, "//td[contains(text(), 'Müşteri')]/following-sibling::td//input"),
                 ],
-                description="Müşteri No alanı",
+                description="Müşteri No",
+                timeout=10,
             )
 
             if musteri_input:
-                self._safe_input(musteri_input, TRADEPLUS_ACCOUNT_NO)
-                log.info(f"Müşteri No girildi: {TRADEPLUS_ACCOUNT_NO[:3]}***")
+                musteri_input.clear()
+                musteri_input.send_keys(KUVEYTTURK_TC)
+                log.info(f"Müşteri No girildi: {KUVEYTTURK_TC[:3]}***")
+                take_screenshot(self.driver, "✅ Müşteri No girildi")
             else:
                 take_screenshot(self.driver, "❌ Müşteri No alanı bulunamadı")
                 raise Exception("Müşteri No alanı bulunamadı!")
 
-            # ── Adım 2: Şifre girişi ─────────────────────────────
+            # ── Adım 2: Şifre ────────────────────────────────────
             log.info("Şifre giriliyor...")
             password_input = self._find_element(
                 possible_selectors=[
-                    (By.CSS_SELECTOR, "[role='dialog'] input[type='password']"),
-                    (By.CSS_SELECTOR, ".MuiDialog-root input[type='password']"),
-                    (By.CSS_SELECTOR, ".MuiModal-root input[type='password']"),
+                    (By.ID, "txtPass"),
+                    (By.NAME, "txtPass"),
                     (By.CSS_SELECTOR, "input[type='password']"),
-                    (By.XPATH, "//label[contains(text(), 'Şifre')]/../..//input"),
-                    (By.XPATH, "//input[@type='password']"),
+                    (By.XPATH, "//input[contains(@id, 'Pass')]"),
+                    (By.XPATH, "//td[contains(text(), 'Şifre')]/following-sibling::td//input"),
                 ],
-                description="Şifre alanı",
+                description="Şifre",
             )
 
             if password_input:
-                self._type_like_human(password_input, TRADEPLUS_PASSWORD)
-                log.info("Şifre girildi (karakter karakter).")
+                password_input.clear()
+                password_input.send_keys(KUVEYTTURK_PASSWORD)
+                log.info("Şifre girildi.")
+                take_screenshot(self.driver, "✅ Şifre girildi")
             else:
                 take_screenshot(self.driver, "❌ Şifre alanı bulunamadı")
                 raise Exception("Şifre alanı bulunamadı!")
@@ -172,322 +120,138 @@ class Auth:
             log.info("Cep telefonu giriliyor...")
             phone_input = self._find_element(
                 possible_selectors=[
-                    (By.XPATH, "//label[contains(text(), 'Telefon')]/../..//input"),
-                    (By.XPATH, "//label[contains(text(), 'Cep')]/../..//input"),
-                    (By.XPATH, "//label[contains(text(), 'Kayıtlı')]/../..//input"),
-                    # "90" değeri olan input (varsayılan değer)
-                    (By.XPATH, "//input[@value='90']"),
-                    (By.XPATH, "(//input[@type='text' or @type='tel' or @type='number'])[3]"),
+                    (By.ID, "txtGsm"),
+                    (By.NAME, "txtGsm"),
+                    (By.CSS_SELECTOR, "input[name='txtGsm']"),
+                    (By.XPATH, "//input[contains(@id, 'Gsm')]"),
+                    (By.XPATH, "//input[contains(@id, 'gsm')]"),
+                    (By.XPATH, "//td[contains(text(), 'Telefon')]/following-sibling::td//input"),
                 ],
-                description="Cep Telefonu alanı",
+                description="Cep Telefonu",
             )
 
             if phone_input:
-                self._safe_input(phone_input, TRADEPLUS_PHONE)
-                log.info(f"Cep telefonu girildi: {TRADEPLUS_PHONE[:5]}*****")
+                phone_input.clear()
+                phone_input.send_keys(KUVEYTTURK_PHONE)
+                log.info(f"Telefon girildi: {KUVEYTTURK_PHONE[:3]}***")
+                take_screenshot(self.driver, "✅ Telefon girildi")
             else:
                 take_screenshot(self.driver, "❌ Telefon alanı bulunamadı")
-                raise Exception("Cep Telefonu alanı bulunamadı!")
+                raise Exception("Telefon alanı bulunamadı!")
 
             # ── Adım 4: CAPTCHA ───────────────────────────────────
-            # CAPTCHA görseli var - bunu Telegram'a gönderip kullanıcıdan alacağız
-            take_screenshot(self.driver, "🔑 CAPTCHA - kodu gir")
+            log.info("CAPTCHA çözülecek...")
+            take_screenshot(self.driver, "🔐 CAPTCHA — kodu girin")
             send_telegram_message(
-                "🔑 <b>CAPTCHA KODU GEREKLİ!</b>\n\n"
-                "Yukarıdaki screenshot'taki görsel kodu oku.\n"
-                "Kodu Telegram'dan gönder.\n"
-                "⏱ 60 saniye bekleniyor..."
+                "🔐 <b>CAPTCHA kodu gerekli!</b>\n"
+                "Yukarıdaki görseldeki kodu mesaj olarak gönderin."
             )
-            log.info("CAPTCHA çözümü bekleniyor (Telegram'dan)...")
 
-            captcha_code = self._wait_for_captcha_from_telegram()
-
+            captcha_code = self._wait_for_captcha_from_telegram(timeout=120)
             if not captcha_code:
-                take_screenshot(self.driver, "❌ CAPTCHA zaman aşımı")
-                raise Exception("CAPTCHA kodu alınamadı!")
+                raise Exception("CAPTCHA kodu alınamadı (timeout)!")
 
             captcha_input = self._find_element(
                 possible_selectors=[
-                    (By.XPATH, "//input[contains(@placeholder, 'kod')]"),
-                    (By.XPATH, "//input[contains(@placeholder, 'Kod')]"),
-                    (By.XPATH, "//input[contains(@placeholder, 'Görsel')]"),
-                    (By.XPATH, "//input[contains(@placeholder, 'görseldeki')]"),
-                    # Son input alanı (CAPTCHA genelde en sondadır)
-                    (By.XPATH, "(//input[@type='text' or @type='tel'])[last()]"),
-                    (By.CSS_SELECTOR, "[role='dialog'] input:last-of-type"),
+                    (By.ID, "txtSecurityCode"),
+                    (By.NAME, "txtSecurityCode"),
+                    (By.CSS_SELECTOR, "input[name='txtSecurityCode']"),
+                    (By.XPATH, "//input[contains(@id, 'Security')]"),
+                    (By.XPATH, "//input[contains(@id, 'security')]"),
+                    (By.XPATH, "//input[contains(@id, 'captcha')]"),
+                    (By.XPATH, "//td[contains(text(), 'Doğrulama')]/following-sibling::td//input"),
                 ],
-                description="CAPTCHA input alanı",
+                description="CAPTCHA / Doğrulama Resmi",
             )
 
             if captcha_input:
-                self._safe_input(captcha_input, captcha_code)
-                log.info(f"CAPTCHA kodu girildi: {captcha_code}")
+                captcha_input.clear()
+                captcha_input.send_keys(captcha_code)
+                log.info(f"CAPTCHA girildi: {captcha_code}")
+                take_screenshot(self.driver, "✅ CAPTCHA girildi")
             else:
                 take_screenshot(self.driver, "❌ CAPTCHA alanı bulunamadı")
-                raise Exception("CAPTCHA input alanı bulunamadı!")
+                raise Exception("CAPTCHA alanı bulunamadı!")
 
-            # ── Adım 5: "İleri" butonuna tıkla ───────────────────
-            take_screenshot(self.driver, "📝 Form dolduruldu")
-            send_telegram_message("📝 Tüm bilgiler girildi, İleri'ye tıklanıyor...")
-
-            ileri_btn = self._find_element(
+            # ── Adım 5: DEVAM butonu ─────────────────────────────
+            log.info("DEVAM butonuna tıklanıyor...")
+            devam_btn = self._find_element(
                 possible_selectors=[
-                    (By.XPATH, "//button[contains(text(), 'İleri')]"),
-                    (By.XPATH, "//button[contains(text(), 'ileri')]"),
-                    (By.XPATH, "//span[contains(text(), 'İleri')]/.."),
-                    (By.CSS_SELECTOR, "[role='dialog'] button[type='submit']"),
-                    (By.CSS_SELECTOR, ".MuiButton-containedPrimary"),
+                    (By.ID, "btnDevam"),
+                    (By.ID, "btnLogin"),
+                    (By.CSS_SELECTOR, "input[value='DEVAM']"),
+                    (By.CSS_SELECTOR, "button[value='DEVAM']"),
+                    (By.XPATH, "//input[@value='DEVAM']"),
+                    (By.XPATH, "//button[contains(text(), 'DEVAM')]"),
+                    (By.XPATH, "//input[contains(@id, 'btn')][@type='submit']"),
                 ],
-                description="İleri butonu",
+                description="DEVAM butonu",
             )
 
-            if ileri_btn:
-                ileri_btn.click()
-                log.info("İleri butonuna tıklandı.")
+            if devam_btn:
+                devam_btn.click()
+                log.info("✅ DEVAM tıklandı.")
+                time.sleep(3)
+                take_screenshot(self.driver, "✅ DEVAM sonrası")
             else:
-                take_screenshot(self.driver, "❌ İleri butonu bulunamadı")
-                raise Exception("İleri butonu bulunamadı!")
+                take_screenshot(self.driver, "❌ DEVAM butonu bulunamadı")
+                raise Exception("DEVAM butonu bulunamadı!")
 
-            time.sleep(3)
-            take_screenshot(self.driver, "📞 İleri tıklandı - sonraki adım")
-
-            # ── Adım 6: Telefon doğrulaması bekleme ──────────────
+            # ── Adım 6: Mobil onay bekle ──────────────────────────
+            log.info("📱 Mobil onay bekleniyor...")
             send_telegram_message(
-                "📞 <b>TELEFON DOĞRULAMASI BEKLENİYOR!</b>\n\n"
-                "Çağrı merkezi seni arayacak.\n"
-                "Aramayı cevaplayıp doğrulama yap.\n"
-                f"⏱ Maksimum bekleme: {PHONE_VERIFICATION_TIMEOUT} saniye"
+                "📱 <b>Mobil Onay Gerekli!</b>\n"
+                "1. Telefonunuza gelen onay bildirimini onaylayın.\n"
+                "2. Türk Bayrağı resmini seçin.\n"
+                f"⏱ Bekleme süresi: {PHONE_VERIFICATION_TIMEOUT} saniye"
             )
-            log.info("📞 Telefon doğrulaması bekleniyor...")
+            take_screenshot(self.driver, "📱 Mobil onay bekleniyor")
 
-            if not self._wait_for_phone_verification():
-                take_screenshot(self.driver, "❌ Doğrulama zaman aşımı")
-                send_telegram_message("❌ Telefon doğrulaması zaman aşımına uğradı!")
-                raise Exception("Telefon doğrulaması zaman aşımına uğradı!")
-
-            # ── Adım 7: Giriş sonrası doğrulama ──────────────────
-            time.sleep(3)
-            self._verify_login()
-            self.is_logged_in = True
-            take_screenshot(self.driver, "✅ Giriş başarılı")
-            send_telegram_message("✅ TradePlus'a başarıyla giriş yapıldı!")
-            log.info("✅ TradePlus'a başarıyla giriş yapıldı!")
-            return True
+            if self._wait_for_mobile_verification():
+                log.info("✅ Mobil onay başarılı!")
+                take_screenshot(self.driver, "✅ Giriş başarılı")
+                send_telegram_message("✅ KuveytTürk İnternet Şubesi girişi başarılı!")
+                self.is_logged_in = True
+                return True
+            else:
+                take_screenshot(self.driver, "❌ Mobil onay timeout")
+                raise Exception("Mobil onay zaman aşımına uğradı!")
 
         except Exception as e:
-            take_screenshot(self.driver, f"❌ Login hatası: {str(e)[:40]}")
-            send_telegram_message(f"❌ TradePlus giriş hatası:\n<code>{e}</code>")
-            log.error(f"Giriş başarısız: {e}")
+            log.error(f"Login hatası: {e}")
+            take_screenshot(self.driver, "❌ Login hatası")
             raise
 
-    def _debug_page_elements(self):
-        """
-        Sayfadaki tüm önemli elementleri loglar ve Telegram'a gönderir.
-        Profil ikonu gibi elementleri bulmak için kullanılır.
-        """
-        debug_msg = "🔍 <b>Sayfa Elementleri:</b>\n\n"
-
-        # Tüm butonları listele
-        buttons = self.driver.find_elements(By.TAG_NAME, "button")
-        debug_msg += f"<b>Butonlar ({len(buttons)}):</b>\n"
-        for i, btn in enumerate(buttons):
-            try:
-                text = btn.text[:30] if btn.text else ""
-                cls = btn.get_attribute("class") or ""
-                aria = btn.get_attribute("aria-label") or ""
-                visible = btn.is_displayed()
-                if visible:
-                    line = f"[{i}] text='{text}' aria='{aria}' class={cls[:60]}"
-                    log.info(f"  Buton {line}")
-                    debug_msg += f"<code>{line}</code>\n"
-            except Exception:
-                pass
-
-        # Tüm SVG ikonlarını listele
-        svgs = self.driver.find_elements(By.TAG_NAME, "svg")
-        debug_msg += f"\n<b>SVG'ler ({len(svgs)}):</b>\n"
-        for i, svg in enumerate(svgs):
-            try:
-                testid = svg.get_attribute("data-testid") or ""
-                cls = svg.get_attribute("class") or ""
-                parent_tag = svg.find_element(By.XPATH, "..").tag_name
-                parent_cls = svg.find_element(By.XPATH, "..").get_attribute("class") or ""
-                if testid or "Icon" in cls:
-                    line = f"[{i}] testid='{testid}' class={cls[:40]} parent=<{parent_tag} class={parent_cls[:40]}>"
-                    log.info(f"  SVG {line}")
-                    debug_msg += f"<code>{line}</code>\n"
-            except Exception:
-                pass
-
-        # MuiIconButton'ları listele (innerHTML ile)
-        icon_btns = self.driver.find_elements(By.CSS_SELECTOR, "[class*='MuiIconButton']")
-        debug_msg += f"\n<b>IconButton'lar ({len(icon_btns)}):</b>\n"
-        for i, ib in enumerate(icon_btns):
-            try:
-                cls = ib.get_attribute("class") or ""
-                aria = ib.get_attribute("aria-label") or ""
-                inner_html = ib.get_attribute("innerHTML") or ""
-                # SVG data-testid'ini çıkar
-                svg_testid = ""
-                try:
-                    svg_el = ib.find_element(By.TAG_NAME, "svg")
-                    svg_testid = svg_el.get_attribute("data-testid") or ""
-                except Exception:
-                    pass
-                visible = ib.is_displayed()
-                if visible:
-                    line = f"[{i}] aria='{aria}' svg='{svg_testid}' class={cls[:50]} html={inner_html[:80]}"
-                    log.info(f"  IconBtn {line}")
-                    debug_msg += f"<code>{line}</code>\n"
-            except Exception:
-                pass
-
-        # img ve a etiketleri (header'daki)
-        imgs = self.driver.find_elements(By.CSS_SELECTOR, "header img, nav img, [class*='header'] img")
-        debug_msg += f"\n<b>Header img'leri ({len(imgs)}):</b>\n"
-        for i, img in enumerate(imgs):
-            try:
-                src = img.get_attribute("src") or ""
-                alt = img.get_attribute("alt") or ""
-                line = f"[{i}] alt='{alt}' src={src[:60]}"
-                log.info(f"  Img {line}")
-                debug_msg += f"<code>{line}</code>\n"
-            except Exception:
-                pass
-
-        # Mesajı Telegram'a gönder (çok uzunsa kes)
-        if len(debug_msg) > 4000:
-            debug_msg = debug_msg[:4000] + "\n...(kesildi)"
-        send_telegram_message(debug_msg)
-
-    def _safe_input(self, element, text: str):
-        """
-        MUI input'lara güvenli şekilde değer girer.
-        Önce JS ile focus + clear, sonra JS ile değer set eder,
-        en son React state'ini senkronize eder.
-        """
-        # 1. Scroll into view + focus
+    # ──────────────────────────────────────────────────────────
+    #  LOGOUT
+    # ──────────────────────────────────────────────────────────
+    def logout(self):
+        """İnternet Şubesi'nden çıkış yapar."""
         try:
-            self.driver.execute_script("""
-                arguments[0].scrollIntoView({block: 'center'});
-                arguments[0].focus();
-            """, element)
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-        # 2. Tıkla (JS ile — intercepted hatasını önler)
-        try:
-            self.driver.execute_script("arguments[0].click();", element)
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-        # 3. Mevcut değeri temizle + yeni değeri yaz (JS ile — interactable hatasını önler)
-        try:
-            self.driver.execute_script("""
-                var el = arguments[0];
-                var text = arguments[1];
-                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(el, text);
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                el.dispatchEvent(new Event('blur', { bubbles: true }));
-            """, element, text)
-            time.sleep(0.3)
+            log.info("Çıkış yapılıyor...")
+            logout_el = self._find_element(
+                possible_selectors=[
+                    (By.XPATH, "//a[contains(text(), 'Çıkış')]"),
+                    (By.XPATH, "//a[contains(text(), 'Güvenli Çıkış')]"),
+                    (By.XPATH, "//a[contains(@href, 'Logout')]"),
+                    (By.CSS_SELECTOR, "a[href*='Logout']"),
+                ],
+                description="Çıkış butonu",
+            )
+            if logout_el:
+                logout_el.click()
+                log.info("✅ Çıkış yapıldı.")
+                self.is_logged_in = False
+            else:
+                log.warning("Çıkış butonu bulunamadı.")
         except Exception as e:
-            log.warning(f"JS input hatası: {e}, send_keys deneniyor...")
-            # Fallback: normal send_keys
-            try:
-                element.clear()
-            except Exception:
-                pass
-            element.send_keys(text)
+            log.error(f"Çıkış hatası: {e}")
 
-    def _type_like_human(self, element, text: str):
-        """
-        Şifre alanı gibi yapıştırma/otomatik doldurma engelli alanlara
-        gerçek klavye simülasyonu ile karakter karakter yazar.
-        Her karakter için keydown → keypress → input → keyup eventleri dispatch eder.
-        """
-        # 1. Scroll + focus + click
-        try:
-            self.driver.execute_script("""
-                arguments[0].scrollIntoView({block: 'center'});
-                arguments[0].focus();
-                arguments[0].click();
-            """, element)
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-        # 2. Mevcut değeri temizle
-        try:
-            self.driver.execute_script("""
-                var el = arguments[0];
-                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(el, '');
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-            """, element)
-        except Exception:
-            pass
-
-        # 3. Her karakteri tek tek KeyboardEvent olarak dispatch et
-        self.driver.execute_script("""
-            var el = arguments[0];
-            var text = arguments[1];
-            el.focus();
-
-            for (var i = 0; i < text.length; i++) {
-                var ch = text[i];
-                var keyCode = ch.charCodeAt(0);
-
-                // keydown
-                el.dispatchEvent(new KeyboardEvent('keydown', {
-                    key: ch, code: 'Key' + ch.toUpperCase(),
-                    keyCode: keyCode, charCode: keyCode,
-                    bubbles: true, cancelable: true
-                }));
-
-                // keypress
-                el.dispatchEvent(new KeyboardEvent('keypress', {
-                    key: ch, code: 'Key' + ch.toUpperCase(),
-                    keyCode: keyCode, charCode: keyCode,
-                    bubbles: true, cancelable: true
-                }));
-
-                // Değeri bir karakter ekleyerek güncelle
-                var nativeSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                nativeSetter.call(el, el.value + ch);
-
-                // input event (InputEvent — React bunu dinler)
-                el.dispatchEvent(new InputEvent('input', {
-                    data: ch, inputType: 'insertText',
-                    bubbles: true, cancelable: true
-                }));
-
-                // keyup
-                el.dispatchEvent(new KeyboardEvent('keyup', {
-                    key: ch, code: 'Key' + ch.toUpperCase(),
-                    keyCode: keyCode, charCode: keyCode,
-                    bubbles: true, cancelable: true
-                }));
-            }
-
-            // Son olarak change + blur
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-        """, element, text)
-        time.sleep(0.5)
-        log.info(f"Karakter karakter yazıldı ({len(text)} karakter)")
-
+    # ──────────────────────────────────────────────────────────
+    #  YARDIMCI METODLAR
+    # ──────────────────────────────────────────────────────────
     def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
-        """
-        Birden fazla selector ile element bulmayı dener.
-        Kısa timeout ile hızlıca deneyip geçer.
-        """
+        """Birden fazla selector ile element bulmayı dener."""
         for by, value in possible_selectors:
             try:
                 element = WebDriverWait(self.driver, timeout).until(
@@ -496,243 +260,121 @@ class Auth:
                 log.info(f"✅ {description} bulundu: {by}={value}")
                 return element
             except TimeoutException:
-                log.debug(f"  ❌ {description}: {by}={value} bulunamadı")
                 continue
-        log.warning(f"{description} hiçbir selector ile bulunamadı!")
+        log.warning(f"⚠️ {description} bulunamadı! Denenen selector'lar: {possible_selectors}")
         return None
 
-    def _wait_for_captcha_from_telegram(self, timeout: int = 90) -> str | None:
-        """
-        Telegram'dan CAPTCHA kodunu bekler.
-        
-        Bot, Telegram'daki son mesajı kontrol eder.
-        Kullanıcı CAPTCHA kodunu Telegram'a yazınca bot okur.
-        """
+    def _wait_for_captcha_from_telegram(self, timeout: int = 120) -> str | None:
+        """Telegram'dan CAPTCHA kodunu bekler."""
         import requests
         from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-        
-        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-            log.error("Telegram bilgileri eksik! CAPTCHA alınamaz.")
-            return None
-        
-        # Mevcut son mesaj ID'sini al (bu mesajdan sonrakileri okuyacağız)
-        last_update_id = self._get_last_telegram_update_id()
-        
-        log.info(f"CAPTCHA kodu bekleniyor (Telegram'dan, {timeout}s)...")
-        
-        elapsed = 0
-        check_interval = 3
-        while elapsed < timeout:
-            time.sleep(check_interval)
-            elapsed += check_interval
-            
-            try:
-                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-                params = {"offset": last_update_id + 1 if last_update_id else -1, "timeout": 1}
-                resp = requests.get(url, params=params, timeout=10)
-                data = resp.json()
-                
-                if data.get("ok") and data.get("result"):
-                    for update in data["result"]:
-                        msg = update.get("message", {})
-                        chat_id = str(msg.get("chat", {}).get("id", ""))
-                        text = msg.get("text", "").strip()
-                        
-                        # Doğru chat'ten gelen mesaj mı?
-                        if chat_id == str(TELEGRAM_CHAT_ID) and text:
-                            # CAPTCHA kodu genelde 5-6 karakter alfanumerik
-                            if 3 <= len(text) <= 10:
-                                log.info(f"✅ CAPTCHA kodu Telegram'dan alındı: {text}")
-                                send_telegram_message(f"✅ CAPTCHA kodu alındı: <b>{text}</b>")
-                                return text
-            except Exception as e:
-                log.debug(f"Telegram kontrol hatası: {e}")
-            
-            if elapsed % 15 == 0:
-                log.info(f"⏳ CAPTCHA bekleniyor... ({elapsed}/{timeout}s)")
-        
-        log.error(f"CAPTCHA kodu {timeout}s içinde alınamadı!")
-        return None
-    
-    def _get_last_telegram_update_id(self) -> int:
-        """Telegram'daki son update ID'sini alır."""
-        import requests
-        from config.settings import TELEGRAM_BOT_TOKEN
-        
+
+        log.info(f"Telegram'dan CAPTCHA kodu bekleniyor (max {timeout}s)...")
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-            params = {"offset": -1, "limit": 1}
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params={"offset": -1, "limit": 1}, timeout=10)
             data = resp.json()
-            if data.get("ok") and data.get("result"):
-                return data["result"][-1].get("update_id", 0)
+            last_update_id = 0
+            if data.get("result"):
+                last_update_id = data["result"][-1]["update_id"]
         except Exception:
-            pass
-        return 0
+            last_update_id = 0
 
-    def _verify_login(self):
-        """Giriş başarılı mı kontrol eder."""
-        # Sayfanın URL'sinin değişip değişmediğini kontrol et
-        current_url = self.driver.current_url
-        log.info(f"Giriş sonrası URL: {current_url}")
-
-        # Hata mesajı var mı kontrol et
-        error_selectors = [
-            (By.CSS_SELECTOR, ".error-message"),
-            (By.CSS_SELECTOR, ".alert-danger"),
-            (By.XPATH, "//*[contains(text(), 'hatalı')]"),
-            (By.XPATH, "//*[contains(text(), 'Hatalı')]"),
-        ]
-        for by, value in error_selectors:
+        start_time = time.time()
+        while time.time() - start_time < timeout:
             try:
-                error_el = self.driver.find_element(by, value)
-                if error_el.is_displayed():
-                    raise Exception(f"Giriş hatası: {error_el.text}")
-            except Exception:
-                continue
+                resp = requests.get(
+                    url,
+                    params={"offset": last_update_id + 1, "timeout": 5},
+                    timeout=15,
+                )
+                data = resp.json()
+                for update in data.get("result", []):
+                    last_update_id = update["update_id"]
+                    msg = update.get("message", {})
+                    chat_id = str(msg.get("chat", {}).get("id", ""))
+                    text = msg.get("text", "").strip()
 
-        # Screenshot al (debug için)
-        take_screenshot(self.driver, "login_success")
+                    if chat_id == str(TELEGRAM_CHAT_ID) and text:
+                        log.info(f"CAPTCHA kodu alındı: {text}")
+                        send_telegram_message(f"✅ CAPTCHA kodu alındı: <b>{text}</b>")
+                        return text
+            except Exception as e:
+                log.warning(f"Telegram polling hatası: {e}")
 
-    def _wait_for_phone_verification(self) -> bool:
+            time.sleep(2)
+
+        log.error("CAPTCHA kodu alınamadı — zaman aşımı!")
+        return None
+
+    def _wait_for_mobile_verification(self) -> bool:
         """
-        Telefon doğrulamasının tamamlanmasını bekler.
-        
-        KuveytTürk çağrı merkezi arar, kullanıcı onaylar.
-        Bu sırada bot, sayfanın değişip değişmediğini kontrol eder.
-        
-        Doğrulama tamamlanınca sayfa otomatik olarak /sayfam/'a yönlendirilir.
+        Mobil onay + görsel seçimi sonrası sayfanın değişmesini bekler.
+        Login sayfasından çıkılırsa → onay başarılıdır.
         """
+        log.info(f"Mobil onay bekleniyor (max {PHONE_VERIFICATION_TIMEOUT}s)...")
+        start_time = time.time()
         login_url = self.driver.current_url
-        log.info(f"Doğrulama öncesi URL: {login_url}")
-        
-        # Sayfada doğrulama ile ilgili mesaj var mı kontrol et
-        take_screenshot(self.driver, "phone_verification_waiting")
-        
-        # Sayfadaki doğrulama mesajını logla
-        try:
-            body_text = self.driver.find_element(By.TAG_NAME, "body").text
-            # Doğrulama ile ilgili anahtar kelimeler ara
-            for keyword in ["doğrulama", "Doğrulama", "aranıyor", "telefon", "Telefon", "onay", "Onay", "çağrı", "Çağrı"]:
-                if keyword in body_text:
-                    # İlgili kısmı bul ve logla
-                    idx = body_text.find(keyword)
-                    start = max(0, idx - 50)
-                    end = min(len(body_text), idx + 100)
-                    log.info(f"📞 Doğrulama mesajı bulundu: ...{body_text[start:end]}...")
-                    break
-        except Exception:
-            pass
-        
-        elapsed = 0
-        while elapsed < PHONE_VERIFICATION_TIMEOUT:
-            time.sleep(PHONE_VERIFICATION_CHECK_INTERVAL)
-            elapsed += PHONE_VERIFICATION_CHECK_INTERVAL
-            
+
+        while time.time() - start_time < PHONE_VERIFICATION_TIMEOUT:
             current_url = self.driver.current_url
-            
-            # URL değiştiyse doğrulama tamamlanmış demektir
-            if current_url != login_url and "sayfam" in current_url:
-                log.info(f"✅ Telefon doğrulaması tamamlandı! ({elapsed}s)")
-                log.info(f"   Yeni URL: {current_url}")
+
+            # URL login sayfasından farklılaştıysa → giriş başarılı
+            if "Login" not in current_url and current_url != login_url:
+                log.info(f"✅ URL değişti: {current_url}")
                 return True
-            
-            # Sayfada başarılı giriş göstergesi var mı
+
+            # Sayfa içeriğinde dashboard elementleri
             try:
-                # "sayfam" veya dashboard benzeri bir element arayalım
-                success_indicators = [
-                    (By.XPATH, "//*[contains(text(), 'Portföy')]"),
-                    (By.XPATH, "//*[contains(text(), 'Kurlar')]"),
-                    (By.XPATH, "//*[contains(text(), 'Hesap')]"),
-                    (By.CSS_SELECTOR, "[class*='MuiTab']"),
-                ]
-                for by, value in success_indicators:
-                    try:
-                        el = self.driver.find_element(by, value)
-                        if el.is_displayed():
-                            log.info(f"✅ Dashboard elementi bulundu, giriş başarılı! ({elapsed}s)")
-                            return True
-                    except Exception:
-                        continue
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                if any(kw in page_text for kw in [
+                    "Hoş Geldiniz", "Hesaplarım", "Ana Sayfa",
+                    "Hesap Özeti", "Bakiye"
+                ]):
+                    log.info("✅ Dashboard içeriği algılandı!")
+                    return True
             except Exception:
                 pass
-            
-            # Her 30 saniyede bir durum bilgisi ver (Telegram'a da)
-            if elapsed % 30 == 0:
-                log.info(f"⏳ Telefon doğrulaması bekleniyor... ({elapsed}/{PHONE_VERIFICATION_TIMEOUT}s)")
-                take_screenshot(self.driver, f"⏳ Doğrulama bekleniyor ({elapsed}s)")
-                send_telegram_message(f"⏳ Hâlâ bekleniyor... ({elapsed}/{PHONE_VERIFICATION_TIMEOUT}s)\nTelefonu cevapla!")
-        
-        log.error(f"❌ Telefon doğrulaması {PHONE_VERIFICATION_TIMEOUT}s içinde tamamlanamadı!")
+
+            elapsed = int(time.time() - start_time)
+            if elapsed % 15 == 0 and elapsed > 0:
+                take_screenshot(self.driver, f"⏳ Onay bekleniyor ({elapsed}s)")
+
+            time.sleep(PHONE_VERIFICATION_CHECK_INTERVAL)
+
         return False
 
-    def logout(self):
-        """TradePlus'tan çıkış yapar."""
-        if not self.is_logged_in:
-            return
-
-        try:
-            logout_btn = self._find_element(
-                possible_selectors=[
-                    (By.XPATH, "//a[contains(text(), 'Çıkış')]"),
-                    (By.XPATH, "//button[contains(text(), 'Çıkış')]"),
-                    (By.CSS_SELECTOR, ".logout"),
-                    (By.CSS_SELECTOR, "[title='Çıkış']"),
-                ],
-                description="Çıkış butonu",
-            )
-            if logout_btn:
-                logout_btn.click()
-                log.info("Çıkış yapıldı.")
-            self.is_logged_in = False
-        except Exception as e:
-            log.warning(f"Çıkış sırasında hata: {e}")
-            self.is_logged_in = False
-
-    def explore_page(self) -> dict:
-        """
-        Sayfa yapısını keşfeder. İlk çalıştırmada
-        doğru selector'ları bulmak için kullanılır.
-        """
+    def explore_page(self):
+        """Sayfadaki form elementlerini keşfeder ve Telegram'a gönderir."""
         log.info("Sayfa yapısı keşfediliyor...")
-        take_screenshot(self.driver, "explore")
 
-        info = {
-            "url": self.driver.current_url,
-            "title": self.driver.title,
-            "inputs": [],
-            "buttons": [],
-            "links": [],
-        }
-
-        # Tüm input'ları listele
         inputs = self.driver.find_elements(By.TAG_NAME, "input")
-        for inp in inputs:
-            info["inputs"].append({
-                "type": inp.get_attribute("type"),
-                "id": inp.get_attribute("id"),
-                "name": inp.get_attribute("name"),
-                "placeholder": inp.get_attribute("placeholder"),
-                "class": inp.get_attribute("class"),
-            })
-
-        # Tüm butonları listele
         buttons = self.driver.find_elements(By.TAG_NAME, "button")
-        for btn in buttons:
-            info["buttons"].append({
-                "text": btn.text,
-                "id": btn.get_attribute("id"),
-                "class": btn.get_attribute("class"),
-                "type": btn.get_attribute("type"),
-            })
+        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='submit']")
+        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='button']")
 
-        log.info(f"Sayfa: {info['title']}")
-        log.info(f"Input sayısı: {len(info['inputs'])}")
-        log.info(f"Buton sayısı: {len(info['buttons'])}")
+        debug_msg = "🔍 <b>Sayfa Yapısı (İnternet Şubesi)</b>\n\n"
+        debug_msg += f"URL: {self.driver.current_url}\n"
+        debug_msg += f"Title: {self.driver.title}\n\n"
 
-        for i, inp in enumerate(info["inputs"]):
-            log.info(f"  Input {i}: {inp}")
-        for i, btn in enumerate(info["buttons"]):
-            log.info(f"  Buton {i}: {btn}")
+        debug_msg += f"<b>📝 Input'lar ({len(inputs)}):</b>\n"
+        for i, inp in enumerate(inputs):
+            inp_id = inp.get_attribute("id") or "-"
+            inp_name = inp.get_attribute("name") or "-"
+            inp_type = inp.get_attribute("type") or "-"
+            inp_value = (inp.get_attribute("value") or "-")[:20]
+            debug_msg += f"  {i+1}. id={inp_id} name={inp_name} type={inp_type} val={inp_value}\n"
 
-        return info
+        debug_msg += f"\n<b>🔘 Butonlar ({len(buttons)}):</b>\n"
+        for i, btn in enumerate(buttons):
+            btn_id = btn.get_attribute("id") or "-"
+            btn_text = btn.text or btn.get_attribute("value") or "-"
+            btn_type = btn.get_attribute("type") or "-"
+            debug_msg += f"  {i+1}. id={btn_id} text={btn_text} type={btn_type}\n"
+
+        if len(debug_msg) > 4000:
+            debug_msg = debug_msg[:4000] + "\n...(kesildi)"
+        send_telegram_message(debug_msg)
+        take_screenshot(self.driver, "🔍 Sayfa keşfi")
+        return debug_msg

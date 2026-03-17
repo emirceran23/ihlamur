@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-İhlamur - KuveytTürk TradePlus Otomasyon Botu
+İhlamur - KuveytTürk İnternet Şubesi Otomasyon Botu
 Ana giriş noktası.
 """
 
@@ -17,11 +17,11 @@ log = get_logger("ihlamur")
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="İhlamur - KuveytTürk TradePlus Otomasyon Botu"
+        description="İhlamur - KuveytTürk İnternet Şubesi Otomasyon Botu"
     )
     parser.add_argument(
         "--action",
-        choices=["buy", "sell", "portfolio", "explore", "explore-stock", "login-test"],
+        choices=["buy", "sell", "portfolio", "explore", "login-test"],
         default="login-test",
         help="Yapılacak işlem (varsayılan: login-test)",
     )
@@ -51,27 +51,19 @@ def main():
 
         # ── Keşif Modu ────────────────────────────────────────
         if args.action == "explore":
-            log.info("Keşif modu: TradePlus sayfa yapısı inceleniyor...")
-            from config.settings import TRADEPLUS_URL
+            log.info("Keşif modu: İnternet Şubesi sayfa yapısı inceleniyor...")
+            from config.settings import KUVEYTTURK_URL
             import time
 
-            driver.get(TRADEPLUS_URL)
+            driver.get(KUVEYTTURK_URL)
+            log.info("Sayfa yükleniyor, 8 saniye bekleniyor...")
+            time.sleep(8)
 
-            # Sayfanın tam render olmasını bekle
-            log.info("Sayfa yükleniyor, 15 saniye bekleniyor...")
-            time.sleep(15)
-
-            # Debug bilgileri
             log.info(f"URL: {driver.current_url}")
             log.info(f"Title: {driver.title}")
-            log.info(f"Page source uzunluğu: {len(driver.page_source)} karakter")
-
-            # HTML'in ilk 2000 karakterini logla
-            html_preview = driver.page_source[:2000]
-            log.info(f"HTML Preview:\n{html_preview}")
 
             page_info = auth.explore_page()
-            log.info(f"Keşif tamamlandı. Screenshot'lar screenshots/ klasöründe.")
+            log.info("Keşif tamamlandı.")
             return
 
         # ── Giriş ─────────────────────────────────────────────
@@ -79,21 +71,13 @@ def main():
             auth.login()
         except Exception as e:
             log.error(f"Giriş yapılamadı: {e}")
-            send_telegram_message(f"❌ TradePlus girişi başarısız: {e}")
+            send_telegram_message(f"❌ İnternet Şubesi girişi başarısız: {e}")
             sys.exit(1)
 
         # ── Giriş Testi ───────────────────────────────────────
         if args.action == "login-test":
             log.info("✅ Giriş testi başarılı!")
-            send_telegram_message("✅ TradePlus giriş testi başarılı!")
-            auth.logout()
-            return
-
-        # ── Hisse Senedi Sayfası Keşfi ────────────────────────
-        if args.action == "explore-stock":
-            log.info("Hisse Senedi sayfası keşfediliyor...")
-            stock_info = trader.explore_stock_page()
-            log.info("Keşif tamamlandı. Screenshot'lar screenshots/ klasöründe.")
+            send_telegram_message("✅ İnternet Şubesi giriş testi başarılı!")
             auth.logout()
             return
 
