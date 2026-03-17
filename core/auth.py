@@ -47,10 +47,7 @@ class Auth:
         send_telegram_message("🌐 TradePlus ana sayfası açıldı...")
 
         try:
-            # ── Adım 0: Sayfayı keşfet ve profil ikonuna tıkla ──
-            log.info("Sayfadaki elementler keşfediliyor...")
-            self._debug_page_elements()
-
+            # ── Adım 0: Profil ikonuna tıkla (login modal'ı aç) ──
             log.info("Profil ikonuna tıklanıyor...")
             account_icon = self._find_element(
                 possible_selectors=[
@@ -102,22 +99,25 @@ class Auth:
             log.info("Bireysel tabına tıklanıyor...")
             bireysel_tab = self._find_element(
                 possible_selectors=[
-                    # role="tab" olan ikinci buton (Bireysel)
-                    (By.CSS_SELECTOR, "[role='tablist'] [role='tab']:nth-child(2)"),
-                    (By.XPATH, "(//button[@role='tab'])[2]"),
-                    # Metin içeren
-                    (By.XPATH, "//button[@role='tab'][.//text()[contains(.,'Bireysel')]]"),
-                    (By.XPATH, "//button[contains(@class, 'MuiTab')][2]"),
-                    # data-testid tabList içindeki ikinci tab
-                    (By.CSS_SELECTOR, "[data-testid='tabList'] button:nth-child(2)"),
+                    # Modal (dialog) içindeki ikinci tab
+                    (By.XPATH, "//div[contains(@class, 'MuiDialog')]//button[@role='tab'][2]"),
+                    (By.XPATH, "//div[contains(@class, 'MuiDialog')]//button[contains(text(), 'Bireysel')]"),
+                    (By.XPATH, "//div[contains(@class, 'MuiModal')]//button[@role='tab'][2]"),
+                    # data-testid tabList içindeki ikinci tab  
+                    (By.CSS_SELECTOR, "[data-testid='tabList'] [role='tab']:nth-child(2)"),
+                    # Bireysel text'i içeren herhangi bir tab
+                    (By.XPATH, "//button[@role='tab'][contains(.,'Bireysel')]"),
+                    (By.XPATH, "(//button[@role='tab'])[last()]"),
                 ],
                 description="Bireysel tabı",
                 timeout=5,
             )
 
             if bireysel_tab:
-                bireysel_tab.click()
-                log.info("✅ Bireysel tabına tıklandı.")
+                # Normal click yerine JavaScript click kullan
+                # (element click intercepted hatasını önler)
+                self.driver.execute_script("arguments[0].click();", bireysel_tab)
+                log.info("✅ Bireysel tabına tıklandı (JS click).")
                 time.sleep(2)
                 take_screenshot(self.driver, "🔐 Bireysel login formu")
                 send_telegram_message("🔐 Bireysel login formu açıldı, bilgiler giriliyor...")
