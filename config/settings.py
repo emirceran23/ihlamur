@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── TradePlus ──────────────────────────────────────────────
-TRADEPLUS_URL = "https://tradeplus.kuveytturk.com.tr"
+TRADEPLUS_URL = "https://tradeplus.com.tr"
 TRADEPLUS_TC = os.getenv("TRADEPLUS_TC", "")
 TRADEPLUS_PASSWORD = os.getenv("TRADEPLUS_PASSWORD", "")
 TRADEPLUS_ACCOUNT_NO = os.getenv("TRADEPLUS_ACCOUNT_NO", "")

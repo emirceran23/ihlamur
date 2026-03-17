@@ -1,0 +1,15 @@
+[Unit]
+Description=İhlamur GitHub Webhook Listener
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ihlamur
+ExecStart=/root/ihlamur/venv/bin/python /root/ihlamur/deploy/webhook_listener.py
+Restart=always
+RestartSec=5
+Environment=GITHUB_WEBHOOK_SECRET=ihlamur-deploy-secret
+
+[Install]
+WantedBy=multi-user.target
