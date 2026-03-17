@@ -47,19 +47,26 @@ class Auth:
         send_telegram_message("🌐 TradePlus ana sayfası açıldı...")
 
         try:
-            # ── Adım 0: Profil ikonuna tıkla (login modal'ı aç) ──
+            # ── Adım 0: Sayfayı keşfet ve profil ikonuna tıkla ──
+            log.info("Sayfadaki elementler keşfediliyor...")
+            self._debug_page_elements()
+
             log.info("Profil ikonuna tıklanıyor...")
             account_icon = self._find_element(
                 possible_selectors=[
+                    # Avatar bileşeni (yuvarlak profil ikonu)
                     (By.CSS_SELECTOR, ".MuiAvatar-root"),
-                    (By.CSS_SELECTOR, "[class*='Avatar']"),
                     (By.XPATH, "//div[contains(@class, 'MuiAvatar')]"),
-                    (By.CSS_SELECTOR, "header .MuiIconButton-root:last-child"),
-                    # SVG ikon olabilir (PersonIcon vs)
-                    (By.XPATH, "//header//button[last()]"),
-                    (By.XPATH, "//nav//button[last()]"),
+                    # Avatar'ı içeren buton
+                    (By.XPATH, "//button[.//div[contains(@class, 'Avatar')]]"),
+                    (By.XPATH, "//button[.//svg[contains(@class, 'Avatar')]]"),
+                    # PersonIcon SVG'si
                     (By.CSS_SELECTOR, "svg[data-testid='PersonIcon']"),
-                    (By.XPATH, "//*[contains(@class, 'MuiSvgIcon')]/ancestor::button"),
+                    (By.XPATH, "//button[.//svg[@data-testid='PersonIcon']]"),
+                    (By.XPATH, "//button[.//svg[@data-testid='AccountCircleIcon']]"),
+                    # Person/Account path içeren SVG'nin parent butonu
+                    (By.XPATH, "//button[.//svg[contains(@data-testid, 'Person')]]"),
+                    (By.XPATH, "//button[.//svg[contains(@data-testid, 'Account')]]"),
                 ],
                 description="Profil/Account ikonu",
                 timeout=3,
@@ -69,13 +76,30 @@ class Auth:
                 account_icon.click()
                 log.info("Profil ikonuna tıklandı.")
                 time.sleep(3)
+                
+                # Login modal açıldı mı kontrol et
+                login_modal_open = False
+                try:
+                    modal = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, 
+                            "//*[contains(text(), 'Müşteri No') or contains(text(), 'Bireysel') or contains(text(), 'Kurumsal')]"
+                        ))
+                    )
+                    if modal.is_displayed():
+                        login_modal_open = True
+                        log.info("✅ Login modal açıldı!")
+                except TimeoutException:
+                    pass
+
+                if not login_modal_open:
+                    take_screenshot(self.driver, "⚠️ Modal açılmadı - yanlış buton")
+                    send_telegram_message("⚠️ Tıklandı ama login modal açılmadı! Yanlış butona basılmış olabilir.")
+                    raise Exception("Login modal açılmadı! Profil ikonu yanlış tespit edilmiş.")
             else:
-                # Bulunamadı — sayfayı keşfet ve Telegram'a gönder
-                log.warning("Profil ikonu bulunamadı! Sayfa elementleri keşfediliyor...")
-                self._debug_page_elements()
+                log.warning("Profil ikonu bulunamadı!")
                 take_screenshot(self.driver, "⚠️ Profil ikonu bulunamadı")
-                send_telegram_message("⚠️ Profil ikonu bulunamadı! Element listesi yukarıda.")
-                raise Exception("Profil/Account ikonu bulunamadı! Debug bilgileri Telegram'a gönderildi.")
+                send_telegram_message("⚠️ Profil ikonu bulunamadı! Debug bilgileri yukarıda.")
+                raise Exception("Profil/Account ikonu bulunamadı!")
 
             # ── Adım 0.5: "Bireysel" tabının seçili olduğundan emin ol ──
             try:
@@ -291,17 +315,24 @@ class Auth:
             except Exception:
                 pass
 
-        # MuiIconButton'ları listele
+        # MuiIconButton'ları listele (innerHTML ile)
         icon_btns = self.driver.find_elements(By.CSS_SELECTOR, "[class*='MuiIconButton']")
         debug_msg += f"\n<b>IconButton'lar ({len(icon_btns)}):</b>\n"
         for i, ib in enumerate(icon_btns):
             try:
                 cls = ib.get_attribute("class") or ""
                 aria = ib.get_attribute("aria-label") or ""
-                inner = ib.get_attribute("innerHTML")[:100] if ib.get_attribute("innerHTML") else ""
+                inner_html = ib.get_attribute("innerHTML") or ""
+                # SVG data-testid'ini çıkar
+                svg_testid = ""
+                try:
+                    svg_el = ib.find_element(By.TAG_NAME, "svg")
+                    svg_testid = svg_el.get_attribute("data-testid") or ""
+                except Exception:
+                    pass
                 visible = ib.is_displayed()
                 if visible:
-                    line = f"[{i}] aria='{aria}' class={cls[:60]}"
+                    line = f"[{i}] aria='{aria}' svg='{svg_testid}' class={cls[:50]} html={inner_html[:80]}"
                     log.info(f"  IconBtn {line}")
                     debug_msg += f"<code>{line}</code>\n"
             except Exception:
