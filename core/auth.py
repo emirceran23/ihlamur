@@ -65,10 +65,21 @@ class Auth:
                 )
                 tamam_btn.click()
                 log.info("✅ Popup kapatıldı (TAMAM)")
-                time.sleep(1)
+                time.sleep(2)
                 take_screenshot(self.driver, "✅ Popup kapatıldı")
             except TimeoutException:
                 log.info("Popup yok veya zaten kapalı, devam ediliyor...")
+
+            # Popup kapandıktan sonra BİREYSEL sekmesine tıkla (zaten aktif olabilir)
+            try:
+                bireysel = self.driver.find_element(
+                    By.XPATH, "//a[contains(text(), 'BİREYSEL') or contains(text(), 'Bireysel')]"
+                )
+                bireysel.click()
+                time.sleep(1)
+                log.info("✅ Bireysel sekmesi tıklandı")
+            except Exception:
+                log.info("Bireysel sekmesi zaten aktif veya bulunamadı")
 
             # ── Adım 1: Müşteri No / T.C. Kimlik No ──────────────
             log.info("Müşteri No giriliyor...")
@@ -82,8 +93,7 @@ class Auth:
             )
 
             if musteri_input:
-                musteri_input.clear()
-                musteri_input.send_keys(KUVEYTTURK_TC)
+                self._js_input(musteri_input, KUVEYTTURK_TC)
                 log.info(f"Müşteri No girildi: {KUVEYTTURK_TC[:3]}***")
                 take_screenshot(self.driver, "✅ Müşteri No girildi")
             else:
@@ -106,8 +116,7 @@ class Auth:
             )
 
             if phone_input:
-                phone_input.clear()
-                phone_input.send_keys(KUVEYTTURK_PHONE)
+                self._js_input(phone_input, KUVEYTTURK_PHONE)
                 log.info(f"Telefon girildi: {KUVEYTTURK_PHONE[:3]}***")
                 take_screenshot(self.driver, "✅ Telefon girildi")
             else:
@@ -135,8 +144,7 @@ class Auth:
             )
 
             if captcha_input:
-                captcha_input.clear()
-                captcha_input.send_keys(captcha_code)
+                self._js_input(captcha_input, captcha_code)
                 log.info(f"CAPTCHA girildi: {captcha_code}")
                 take_screenshot(self.driver, "✅ CAPTCHA girildi")
             else:
@@ -155,7 +163,7 @@ class Auth:
             )
 
             if devam_btn:
-                devam_btn.click()
+                self.driver.execute_script("arguments[0].click();", devam_btn)
                 log.info("✅ DEVAM tıklandı.")
                 time.sleep(3)
                 take_screenshot(self.driver, "✅ DEVAM sonrası")
@@ -216,6 +224,22 @@ class Auth:
     # ──────────────────────────────────────────────────────────
     #  YARDIMCI METODLAR
     # ──────────────────────────────────────────────────────────
+    def _js_input(self, element, text: str):
+        """
+        JavaScript ile input alanına değer girer.
+        element not interactable hatasını bypass eder.
+        """
+        self.driver.execute_script("""
+            var el = arguments[0];
+            var text = arguments[1];
+            el.value = '';
+            el.focus();
+            el.value = text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        """, element, text)
+        time.sleep(0.3)
+
     def _type_password_virtual_keyboard(self, password: str):
         """
         Sanal klavye butonlarına tıklayarak şifre girer.
