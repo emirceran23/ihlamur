@@ -27,21 +27,56 @@ class Auth:
         """
         TradePlus'a giriş yapar.
 
-        TradePlus web sayfasının yapısına göre selector'lar
-        güncellenmelidir. İlk çalıştırmada screenshot alıp
-        doğru elementleri tespit etmemiz gerekecek.
+        Akış:
+        1. TradePlus ana sayfasını aç
+        2. Sağ üstteki profil/account ikonuna tıkla → Login formu açılır
+        3. TC Kimlik No ve Şifre gir
+        4. Giriş butonuna tıkla
+        5. Telefon doğrulamasını bekle
         """
         log.info("TradePlus'a giriş yapılıyor...")
         self.driver.get(TRADEPLUS_URL)
-        time.sleep(3)  # sayfanın tam yüklenmesini bekle
+        time.sleep(5)  # sayfanın tam yüklenmesini bekle
 
-        # Login sayfası screenshot'ını Telegram'a gönder
-        take_screenshot(self.driver, "🔐 Login sayfası yüklendi")
-        send_telegram_message("🔐 TradePlus login sayfası açıldı, giriş başlıyor...")
+        take_screenshot(self.driver, "🌐 TradePlus ana sayfa")
+        send_telegram_message("🌐 TradePlus ana sayfası açıldı...")
 
         try:
+            # ── Adım 0: Profil/Account ikonuna tıkla (login formunu aç) ──
+            log.info("Profil ikonuna tıklanıyor (login formu için)...")
+            account_icon = self._find_element(
+                possible_selectors=[
+                    # Sağ üstteki yuvarlak profil/avatar ikonu
+                    (By.CSS_SELECTOR, ".MuiAvatar-root"),
+                    (By.CSS_SELECTOR, "[class*='Avatar']"),
+                    (By.CSS_SELECTOR, ".MuiIconButton-root .MuiAvatar-root"),
+                    (By.XPATH, "//div[contains(@class, 'MuiAvatar')]"),
+                    (By.XPATH, "//button[contains(@class, 'MuiIconButton')]//img"),
+                    # Sağ üstteki son buton/ikon
+                    (By.CSS_SELECTOR, "header .MuiIconButton-root:last-child"),
+                    (By.CSS_SELECTOR, "[class*='avatar']"),
+                    (By.CSS_SELECTOR, "[class*='profile']"),
+                    (By.CSS_SELECTOR, "[class*='account']"),
+                    (By.XPATH, "//button[contains(@aria-label, 'hesap')]"),
+                    (By.XPATH, "//button[contains(@aria-label, 'profil')]"),
+                    (By.XPATH, "//button[contains(@aria-label, 'account')]"),
+                ],
+                description="Profil/Account ikonu",
+            )
+
+            if account_icon:
+                account_icon.click()
+                log.info("Profil ikonuna tıklandı, login formu bekleniyor...")
+                time.sleep(3)
+                take_screenshot(self.driver, "🔐 Login formu açıldı")
+                send_telegram_message("🔐 Login formu açıldı, bilgiler giriliyor...")
+            else:
+                # Belki zaten login sayfasındayız, devam edelim
+                take_screenshot(self.driver, "⚠️ Profil ikonu bulunamadı")
+                send_telegram_message("⚠️ Profil ikonu bulunamadı, login formu doğrudan aranacak...")
+                log.warning("Profil ikonu bulunamadı, doğrudan login formu aranacak...")
+
             # ── Adım 1: TC Kimlik No girişi ──────────────────────
-            # NOT: Selector'lar TradePlus arayüzüne göre güncellenmeli
             tc_input = self._find_element(
                 possible_selectors=[
                     (By.ID, "tckn"),
@@ -50,9 +85,14 @@ class Auth:
                     (By.NAME, "tcKimlikNo"),
                     (By.CSS_SELECTOR, "input[placeholder*='T.C.']"),
                     (By.CSS_SELECTOR, "input[placeholder*='Kimlik']"),
-                    (By.CSS_SELECTOR, "input[type='text']"),
+                    (By.CSS_SELECTOR, "input[placeholder*='TCKN']"),
                     (By.XPATH, "//input[contains(@placeholder, 'T.C.')]"),
                     (By.XPATH, "//input[contains(@placeholder, 'Kimlik')]"),
+                    (By.XPATH, "//input[contains(@placeholder, 'TCKN')]"),
+                    # Login formundaki ilk text input
+                    (By.CSS_SELECTOR, "form input[type='text']"),
+                    (By.CSS_SELECTOR, ".MuiTextField-root input"),
+                    (By.CSS_SELECTOR, "input[type='text']"),
                 ],
                 description="TC Kimlik No alanı",
             )
