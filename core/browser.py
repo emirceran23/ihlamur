@@ -4,11 +4,9 @@ Headless Chrome/Chromium ile DigitalOcean droplet üzerinde çalışır.
 """
 
 import os
-import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from config.settings import HEADLESS, IMPLICIT_WAIT, PAGE_LOAD_TIMEOUT
 from utils.logger import get_logger
 
@@ -38,20 +36,6 @@ class Browser:
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-infobars")
         options.add_argument("--disable-software-rasterizer")
-        options.add_argument("--remote-debugging-port=9222")
-
-        # Snap Chromium için binary yolu
-        import shutil
-        for binary_path in [
-            "/snap/bin/chromium",
-            "/usr/bin/chromium-browser",
-            "/usr/bin/chromium",
-            "/usr/bin/google-chrome",
-        ]:
-            if shutil.which(binary_path) or os.path.exists(binary_path):
-                options.binary_location = binary_path
-                log.info(f"Chromium binary: {binary_path}")
-                break
 
         # Bot algılamayı zorlaştır
         options.add_argument("--disable-blink-features=AutomationControlled")
@@ -66,16 +50,20 @@ class Browser:
         )
 
         try:
-            # Önce sistem ChromeDriver'ı dene (droplet'te apt ile kurulu)
-            try:
-                service = Service("/usr/bin/chromedriver")
-                self.driver = webdriver.Chrome(service=service, options=options)
-                log.info("Sistem ChromeDriver kullanılıyor.")
-            except Exception:
-                # webdriver-manager ile otomatik indir
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=options)
-                log.info("webdriver-manager ChromeDriver kullanılıyor.")
+            # Selenium 4.27 kendi ChromeDriver'ını otomatik yönetir
+            # Binary yollarını dene
+            for binary in [
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/google-chrome",
+                "/opt/chrome/chrome",
+            ]:
+                if os.path.exists(binary):
+                    options.binary_location = binary
+                    log.info(f"Chrome binary: {binary}")
+                    break
+
+            self.driver = webdriver.Chrome(options=options)
+            log.info("Chrome başlatıldı (Selenium otomatik driver yönetimi).")
 
             self.driver.implicitly_wait(IMPLICIT_WAIT)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)

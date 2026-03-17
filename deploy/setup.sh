@@ -11,7 +11,14 @@ echo "🌳 İhlamur Droplet Kurulumu Başlıyor..."
 # ── 1. Sistem bağımlılıkları ──────────────────────────────
 echo "📦 Sistem bağımlılıkları kuruluyor..."
 apt-get update -y
-apt-get install -y chromium-browser chromium-chromedriver python3-venv git
+apt-get install -y python3-venv git wget curl unzip
+
+# ── 1b. Google Chrome kur (snap chromium sürüm sorunu yapar) ──
+echo "🌐 Google Chrome kuruluyor..."
+wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+apt-get install -y /tmp/chrome.deb || apt-get -f install -y
+rm -f /tmp/chrome.deb
+echo "✅ Chrome sürümü: $(google-chrome-stable --version)"
 
 # ── 2. Python venv ────────────────────────────────────────
 echo "🐍 Python venv oluşturuluyor..."
