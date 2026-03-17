@@ -54,7 +54,20 @@ def main():
             log.info("Keşif modu: TradePlus sayfa yapısı inceleniyor...")
             driver.get("https://tradeplus.kuveytturk.com.tr")
             import time
-            time.sleep(3)
+
+            # Sayfanın tam render olmasını bekle
+            log.info("Sayfa yükleniyor, 10 saniye bekleniyor...")
+            time.sleep(10)
+
+            # Debug bilgileri
+            log.info(f"URL: {driver.current_url}")
+            log.info(f"Title: {driver.title}")
+            log.info(f"Page source uzunluğu: {len(driver.page_source)} karakter")
+
+            # HTML'in ilk 2000 karakterini logla
+            html_preview = driver.page_source[:2000]
+            log.info(f"HTML Preview:\n{html_preview}")
+
             page_info = auth.explore_page()
             log.info(f"Keşif tamamlandı. Screenshot'lar screenshots/ klasöründe.")
             return

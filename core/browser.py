@@ -3,6 +3,8 @@ Selenium Browser yönetimi.
 Headless Chrome/Chromium ile DigitalOcean droplet üzerinde çalışır.
 """
 
+import os
+import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -35,6 +37,21 @@ class Browser:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-infobars")
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--remote-debugging-port=9222")
+
+        # Snap Chromium için binary yolu
+        import shutil
+        for binary_path in [
+            "/snap/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/usr/bin/google-chrome",
+        ]:
+            if shutil.which(binary_path) or os.path.exists(binary_path):
+                options.binary_location = binary_path
+                log.info(f"Chromium binary: {binary_path}")
+                break
 
         # Bot algılamayı zorlaştır
         options.add_argument("--disable-blink-features=AutomationControlled")
