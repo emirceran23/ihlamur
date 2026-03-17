@@ -53,9 +53,12 @@ class Browser:
             # Selenium 4.27 kendi ChromeDriver'ını otomatik yönetir
             # Binary yollarını dene
             for binary in [
-                "/usr/bin/google-chrome-stable",
+                "/opt/google/chrome/google-chrome",
                 "/usr/bin/google-chrome",
-                "/opt/chrome/chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+                "/snap/bin/chromium",
             ]:
                 if os.path.exists(binary):
                     options.binary_location = binary
