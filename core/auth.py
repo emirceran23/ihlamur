@@ -7,7 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from config.settings import TRADEPLUS_URL, TRADEPLUS_TC, TRADEPLUS_PASSWORD
+from config.settings import TRADEPLUS_URL, TRADEPLUS_TC, TRADEPLUS_PASSWORD, PHONE_VERIFICATION_TIMEOUT, PHONE_VERIFICATION_CHECK_INTERVAL
 from utils.logger import get_logger
 from utils.helpers import take_screenshot, retry
 
@@ -22,7 +22,7 @@ class Auth:
         self.wait = WebDriverWait(driver, 15)
         self.is_logged_in = False
 
-    @retry(max_attempts=3, delay=3.0)
+    @retry(max_attempts=2, delay=5.0)
     def login(self) -> bool:
         """
         TradePlus'a giriş yapar.
@@ -103,8 +103,21 @@ class Auth:
                 take_screenshot(self.driver, "login_button_not_found")
                 raise Exception("Giriş butonu bulunamadı!")
 
-            # ── Adım 4: Giriş sonrası doğrulama ──────────────────
-            time.sleep(5)
+            # ── Adım 4: Telefon doğrulaması bekleme ──────────────
+            take_screenshot(self.driver, "before_phone_verification")
+            log.info("=" * 60)
+            log.info("📞 TELEFON DOĞRULAMASI BEKLENİYOR!")
+            log.info("   Çağrı merkezi sizi arayacak.")
+            log.info("   Aramayı cevaplayıp doğrulama yapın.")
+            log.info(f"   Maksimum bekleme: {PHONE_VERIFICATION_TIMEOUT} saniye")
+            log.info("=" * 60)
+
+            if not self._wait_for_phone_verification():
+                take_screenshot(self.driver, "phone_verification_timeout")
+                raise Exception("Telefon doğrulaması zaman aşımına uğradı!")
+
+            # ── Adım 5: Giriş sonrası doğrulama ──────────────────
+            time.sleep(3)
             self._verify_login()
             self.is_logged_in = True
             log.info("✅ TradePlus'a başarıyla giriş yapıldı!")
@@ -155,6 +168,77 @@ class Auth:
 
         # Screenshot al (debug için)
         take_screenshot(self.driver, "login_success")
+
+    def _wait_for_phone_verification(self) -> bool:
+        """
+        Telefon doğrulamasının tamamlanmasını bekler.
+        
+        KuveytTürk çağrı merkezi arar, kullanıcı onaylar.
+        Bu sırada bot, sayfanın değişip değişmediğini kontrol eder.
+        
+        Doğrulama tamamlanınca sayfa otomatik olarak /sayfam/'a yönlendirilir.
+        """
+        login_url = self.driver.current_url
+        log.info(f"Doğrulama öncesi URL: {login_url}")
+        
+        # Sayfada doğrulama ile ilgili mesaj var mı kontrol et
+        take_screenshot(self.driver, "phone_verification_waiting")
+        
+        # Sayfadaki doğrulama mesajını logla
+        try:
+            body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            # Doğrulama ile ilgili anahtar kelimeler ara
+            for keyword in ["doğrulama", "Doğrulama", "aranıyor", "telefon", "Telefon", "onay", "Onay", "çağrı", "Çağrı"]:
+                if keyword in body_text:
+                    # İlgili kısmı bul ve logla
+                    idx = body_text.find(keyword)
+                    start = max(0, idx - 50)
+                    end = min(len(body_text), idx + 100)
+                    log.info(f"📞 Doğrulama mesajı bulundu: ...{body_text[start:end]}...")
+                    break
+        except Exception:
+            pass
+        
+        elapsed = 0
+        while elapsed < PHONE_VERIFICATION_TIMEOUT:
+            time.sleep(PHONE_VERIFICATION_CHECK_INTERVAL)
+            elapsed += PHONE_VERIFICATION_CHECK_INTERVAL
+            
+            current_url = self.driver.current_url
+            
+            # URL değiştiyse doğrulama tamamlanmış demektir
+            if current_url != login_url and "sayfam" in current_url:
+                log.info(f"✅ Telefon doğrulaması tamamlandı! ({elapsed}s)")
+                log.info(f"   Yeni URL: {current_url}")
+                return True
+            
+            # Sayfada başarılı giriş göstergesi var mı
+            try:
+                # "sayfam" veya dashboard benzeri bir element arayalım
+                success_indicators = [
+                    (By.XPATH, "//*[contains(text(), 'Portföy')]"),
+                    (By.XPATH, "//*[contains(text(), 'Kurlar')]"),
+                    (By.XPATH, "//*[contains(text(), 'Hesap')]"),
+                    (By.CSS_SELECTOR, "[class*='MuiTab']"),
+                ]
+                for by, value in success_indicators:
+                    try:
+                        el = self.driver.find_element(by, value)
+                        if el.is_displayed():
+                            log.info(f"✅ Dashboard elementi bulundu, giriş başarılı! ({elapsed}s)")
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            
+            # Her 15 saniyede bir durum bilgisi ver
+            if elapsed % 15 == 0:
+                log.info(f"⏳ Telefon doğrulaması bekleniyor... ({elapsed}/{PHONE_VERIFICATION_TIMEOUT}s)")
+                take_screenshot(self.driver, f"phone_verify_{elapsed}s")
+        
+        log.error(f"❌ Telefon doğrulaması {PHONE_VERIFICATION_TIMEOUT}s içinde tamamlanamadı!")
+        return False
 
     def logout(self):
         """TradePlus'tan çıkış yapar."""

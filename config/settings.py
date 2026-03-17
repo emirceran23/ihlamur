@@ -27,3 +27,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # ── İşlem Limitleri ───────────────────────────────────────
 MAX_ORDER_AMOUNT = 50000     # TL - tek seferde max işlem tutarı
 MAX_DAILY_TRADES = 20        # günlük max işlem sayısı
+
+# ── Telefon Doğrulama ─────────────────────────────────────
+PHONE_VERIFICATION_TIMEOUT = 120  # saniye - çağrı merkezi doğrulaması için max bekleme
+PHONE_VERIFICATION_CHECK_INTERVAL = 3  # saniye - URL kontrol sıklığı
