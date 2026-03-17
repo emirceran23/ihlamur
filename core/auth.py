@@ -162,8 +162,8 @@ class Auth:
             )
 
             if password_input:
-                self._safe_input(password_input, TRADEPLUS_PASSWORD)
-                log.info("Şifre girildi.")
+                self._type_like_human(password_input, TRADEPLUS_PASSWORD)
+                log.info("Şifre girildi (karakter karakter).")
             else:
                 take_screenshot(self.driver, "❌ Şifre alanı bulunamadı")
                 raise Exception("Şifre alanı bulunamadı!")
@@ -404,6 +404,84 @@ class Auth:
             except Exception:
                 pass
             element.send_keys(text)
+
+    def _type_like_human(self, element, text: str):
+        """
+        Şifre alanı gibi yapıştırma/otomatik doldurma engelli alanlara
+        gerçek klavye simülasyonu ile karakter karakter yazar.
+        Her karakter için keydown → keypress → input → keyup eventleri dispatch eder.
+        """
+        # 1. Scroll + focus + click
+        try:
+            self.driver.execute_script("""
+                arguments[0].scrollIntoView({block: 'center'});
+                arguments[0].focus();
+                arguments[0].click();
+            """, element)
+            time.sleep(0.3)
+        except Exception:
+            pass
+
+        # 2. Mevcut değeri temizle
+        try:
+            self.driver.execute_script("""
+                var el = arguments[0];
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, '');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            """, element)
+        except Exception:
+            pass
+
+        # 3. Her karakteri tek tek KeyboardEvent olarak dispatch et
+        self.driver.execute_script("""
+            var el = arguments[0];
+            var text = arguments[1];
+            el.focus();
+
+            for (var i = 0; i < text.length; i++) {
+                var ch = text[i];
+                var keyCode = ch.charCodeAt(0);
+
+                // keydown
+                el.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: ch, code: 'Key' + ch.toUpperCase(),
+                    keyCode: keyCode, charCode: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+
+                // keypress
+                el.dispatchEvent(new KeyboardEvent('keypress', {
+                    key: ch, code: 'Key' + ch.toUpperCase(),
+                    keyCode: keyCode, charCode: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+
+                // Değeri bir karakter ekleyerek güncelle
+                var nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+                nativeSetter.call(el, el.value + ch);
+
+                // input event (InputEvent — React bunu dinler)
+                el.dispatchEvent(new InputEvent('input', {
+                    data: ch, inputType: 'insertText',
+                    bubbles: true, cancelable: true
+                }));
+
+                // keyup
+                el.dispatchEvent(new KeyboardEvent('keyup', {
+                    key: ch, code: 'Key' + ch.toUpperCase(),
+                    keyCode: keyCode, charCode: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+            }
+
+            // Son olarak change + blur
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        """, element, text)
+        time.sleep(0.5)
+        log.info(f"Karakter karakter yazıldı ({len(text)} karakter)")
 
     def _find_element(self, possible_selectors: list, description: str, timeout: int = 5):
         """
