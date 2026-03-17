@@ -346,32 +346,91 @@ class Auth:
         return False
 
     def explore_page(self):
-        """Sayfadaki form elementlerini keşfeder ve Telegram'a gönderir."""
+        """
+        Sayfadaki form elementlerini keşfeder ve Telegram'a gönderir.
+        Popup kapatır, iframe kontrol eder, tüm input/button'ları listeler.
+        """
         log.info("Sayfa yapısı keşfediliyor...")
 
-        inputs = self.driver.find_elements(By.TAG_NAME, "input")
-        buttons = self.driver.find_elements(By.TAG_NAME, "button")
-        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='submit']")
-        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='button']")
+        # Popup kapat
+        try:
+            tamam_btn = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((
+                    By.XPATH,
+                    "//button[contains(text(), 'TAMAM')] | "
+                    "//input[@value='TAMAM'] | "
+                    "//a[contains(text(), 'TAMAM')]"
+                ))
+            )
+            tamam_btn.click()
+            log.info("✅ Popup kapatıldı")
+            time.sleep(1)
+        except TimeoutException:
+            log.info("Popup yok")
+
+        take_screenshot(self.driver, "🔍 Popup sonrası sayfa")
 
         debug_msg = "🔍 <b>Sayfa Yapısı (İnternet Şubesi)</b>\n\n"
         debug_msg += f"URL: {self.driver.current_url}\n"
         debug_msg += f"Title: {self.driver.title}\n\n"
 
-        debug_msg += f"<b>📝 Input'lar ({len(inputs)}):</b>\n"
-        for i, inp in enumerate(inputs):
+        # iframe var mı kontrol et
+        iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+        debug_msg += f"<b>🖼 iframe sayısı: {len(iframes)}</b>\n"
+        for i, iframe in enumerate(iframes):
+            ifr_id = iframe.get_attribute("id") or "-"
+            ifr_name = iframe.get_attribute("name") or "-"
+            ifr_src = (iframe.get_attribute("src") or "-")[:80]
+            debug_msg += f"  {i+1}. id={ifr_id} name={ifr_name} src={ifr_src}\n"
+
+        # Ana sayfadaki input'lar
+        inputs = self.driver.find_elements(By.TAG_NAME, "input")
+        debug_msg += f"\n<b>📝 Ana sayfa Input'lar ({len(inputs)}):</b>\n"
+        for i, inp in enumerate(inputs[:15]):
             inp_id = inp.get_attribute("id") or "-"
             inp_name = inp.get_attribute("name") or "-"
             inp_type = inp.get_attribute("type") or "-"
             inp_value = (inp.get_attribute("value") or "-")[:20]
             debug_msg += f"  {i+1}. id={inp_id} name={inp_name} type={inp_type} val={inp_value}\n"
 
+        # iframe'lerin içine gir ve kontrol et
+        for i, iframe in enumerate(iframes):
+            try:
+                self.driver.switch_to.frame(iframe)
+                iframe_inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                ifr_id = iframe.get_attribute("id") or iframe.get_attribute("name") or str(i)
+                debug_msg += f"\n<b>📝 iframe[{ifr_id}] Input'lar ({len(iframe_inputs)}):</b>\n"
+                for j, inp in enumerate(iframe_inputs[:15]):
+                    inp_id = inp.get_attribute("id") or "-"
+                    inp_name = inp.get_attribute("name") or "-"
+                    inp_type = inp.get_attribute("type") or "-"
+                    inp_value = (inp.get_attribute("value") or "-")[:20]
+                    debug_msg += f"  {j+1}. id={inp_id} name={inp_name} type={inp_type} val={inp_value}\n"
+                self.driver.switch_to.default_content()
+            except Exception as e:
+                debug_msg += f"\n  ⚠️ iframe[{i}] erişim hatası: {e}\n"
+                self.driver.switch_to.default_content()
+
+        # Butonlar
+        buttons = self.driver.find_elements(By.TAG_NAME, "button")
+        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='submit']")
+        buttons += self.driver.find_elements(By.CSS_SELECTOR, "input[type='button']")
         debug_msg += f"\n<b>🔘 Butonlar ({len(buttons)}):</b>\n"
-        for i, btn in enumerate(buttons):
+        for i, btn in enumerate(buttons[:10]):
             btn_id = btn.get_attribute("id") or "-"
             btn_text = btn.text or btn.get_attribute("value") or "-"
             btn_type = btn.get_attribute("type") or "-"
             debug_msg += f"  {i+1}. id={btn_id} text={btn_text} type={btn_type}\n"
+
+        # Tab / sekme linkleri
+        links = self.driver.find_elements(By.TAG_NAME, "a")
+        tab_links = [l for l in links if any(kw in (l.text or "").upper() for kw in ["BİREYSEL", "KURUMSAL", "BIREYSEL"])]
+        debug_msg += f"\n<b>🔗 Tab linkleri ({len(tab_links)}):</b>\n"
+        for i, link in enumerate(tab_links):
+            link_text = link.text or "-"
+            link_href = (link.get_attribute("href") or "-")[:60]
+            link_class = (link.get_attribute("class") or "-")[:40]
+            debug_msg += f"  {i+1}. text={link_text} href={link_href} class={link_class}\n"
 
         if len(debug_msg) > 4000:
             debug_msg = debug_msg[:4000] + "\n...(kesildi)"
