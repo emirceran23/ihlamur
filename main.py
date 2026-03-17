@@ -21,7 +21,7 @@ def parse_args():
     )
     parser.add_argument(
         "--action",
-        choices=["buy", "sell", "portfolio", "explore", "login-test"],
+        choices=["buy", "sell", "portfolio", "explore", "explore-stock", "login-test"],
         default="login-test",
         help="Yapılacak işlem (varsayılan: login-test)",
     )
@@ -86,6 +86,14 @@ def main():
         if args.action == "login-test":
             log.info("✅ Giriş testi başarılı!")
             send_telegram_message("✅ TradePlus giriş testi başarılı!")
+            auth.logout()
+            return
+
+        # ── Hisse Senedi Sayfası Keşfi ────────────────────────
+        if args.action == "explore-stock":
+            log.info("Hisse Senedi sayfası keşfediliyor...")
+            stock_info = trader.explore_stock_page()
+            log.info("Keşif tamamlandı. Screenshot'lar screenshots/ klasöründe.")
             auth.logout()
             return
 

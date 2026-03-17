@@ -381,6 +381,165 @@ class Trader:
     # Keşif (İlk kurulum için)
     # ──────────────────────────────────────────────────────────
 
+    def explore_stock_page(self) -> dict:
+        """
+        Hisse Senedi tabına tıklayıp sayfadaki tüm elementleri keşfeder.
+        Bu bilgilerle emir gönderme selector'larını belirleyeceğiz.
+        """
+        log.info("=" * 60)
+        log.info("🔍 Hisse Senedi sayfası keşfi başlıyor...")
+        log.info("=" * 60)
+
+        take_screenshot(self.driver, "before_stock_tab")
+
+        # ── Adım 1: "Hisse Senedi" tabına tıkla ─────────────
+        stock_tab = self._find_clickable(
+            selectors=[
+                (By.XPATH, "//button[contains(text(), 'Hisse Senedi')]"),
+                (By.XPATH, "//span[contains(text(), 'Hisse Senedi')]/.."),
+                (By.XPATH, "//*[contains(@class, 'MuiTab')][contains(text(), 'Hisse')]"),
+                (By.CSS_SELECTOR, ".MuiTab-root:nth-child(2)"),
+            ],
+            description="Hisse Senedi tabı",
+        )
+        if stock_tab:
+            stock_tab.click()
+            log.info("✅ Hisse Senedi tabına tıklandı!")
+            time.sleep(5)  # Sayfanın yüklenmesini bekle
+        else:
+            log.warning("⚠️ Hisse Senedi tabı bulunamadı!")
+
+        take_screenshot(self.driver, "stock_tab_clicked")
+
+        # ── Adım 2: Sayfadaki tüm elementleri keşfet ─────────
+        page_info = {
+            "url": self.driver.current_url,
+            "title": self.driver.title,
+            "inputs": [],
+            "buttons": [],
+            "selects": [],
+            "tables": [],
+            "divs_with_text": [],
+            "links": [],
+        }
+
+        # Input'lar
+        inputs = self.driver.find_elements(By.TAG_NAME, "input")
+        for i, inp in enumerate(inputs):
+            try:
+                info = {
+                    "index": i,
+                    "type": inp.get_attribute("type"),
+                    "id": inp.get_attribute("id"),
+                    "name": inp.get_attribute("name"),
+                    "placeholder": inp.get_attribute("placeholder"),
+                    "class": inp.get_attribute("class"),
+                    "value": inp.get_attribute("value"),
+                    "visible": inp.is_displayed(),
+                    "aria-label": inp.get_attribute("aria-label"),
+                }
+                page_info["inputs"].append(info)
+                if info["visible"]:
+                    log.info(f"  Input[{i}]: type={info['type']} | placeholder={info['placeholder']} | id={info['id']} | class={info['class'][:60] if info['class'] else ''}")
+            except Exception:
+                pass
+
+        # Butonlar
+        buttons = self.driver.find_elements(By.TAG_NAME, "button")
+        for i, btn in enumerate(buttons):
+            try:
+                info = {
+                    "index": i,
+                    "text": btn.text[:80] if btn.text else "",
+                    "id": btn.get_attribute("id"),
+                    "class": btn.get_attribute("class"),
+                    "type": btn.get_attribute("type"),
+                    "visible": btn.is_displayed(),
+                    "aria-label": btn.get_attribute("aria-label"),
+                }
+                page_info["buttons"].append(info)
+                if info["visible"] and info["text"]:
+                    log.info(f"  Buton[{i}]: {info['text']} | class={info['class'][:80] if info['class'] else ''}")
+            except Exception:
+                pass
+
+        # MuiTab'lar (React tabları)
+        tabs = self.driver.find_elements(By.CSS_SELECTOR, "[role='tab']")
+        for i, tab in enumerate(tabs):
+            try:
+                log.info(f"  Tab[{i}]: {tab.text} | selected={tab.get_attribute('aria-selected')} | class={tab.get_attribute('class')[:80]}")
+            except Exception:
+                pass
+
+        # Tablolar
+        tables = self.driver.find_elements(By.TAG_NAME, "table")
+        for i, table in enumerate(tables):
+            try:
+                headers = [th.text for th in table.find_elements(By.TAG_NAME, "th")]
+                rows_count = len(table.find_elements(By.TAG_NAME, "tr"))
+                log.info(f"  Tablo[{i}]: {rows_count} satır | Başlıklar: {headers}")
+                page_info["tables"].append({"headers": headers, "rows": rows_count})
+            except Exception:
+                pass
+
+        # Önemli div'ler - Alış/Satış/Emir ile ilgili olanlar
+        keywords = ["Alış", "Satış", "Emir", "Lot", "Fiyat", "Miktar", "Sembol", "Hisse", "İşlem"]
+        for keyword in keywords:
+            try:
+                elements = self.driver.find_elements(
+                    By.XPATH, f"//*[contains(text(), '{keyword}')]"
+                )
+                for el in elements[:3]:  # her keyword için max 3
+                    if el.is_displayed():
+                        log.info(f"  BULUNDU: {keyword} -> tag={el.tag_name} text={el.text[:80]} class={el.get_attribute('class')[:60] if el.get_attribute('class') else ''}")
+                        page_info["divs_with_text"].append({
+                            "keyword": keyword,
+                            "tag": el.tag_name,
+                            "text": el.text[:80],
+                            "class": el.get_attribute("class"),
+                        })
+            except Exception:
+                pass
+
+        # Select (dropdown) elemanları
+        selects = self.driver.find_elements(By.TAG_NAME, "select")
+        for i, sel in enumerate(selects):
+            try:
+                log.info(f"  Select[{i}]: id={sel.get_attribute('id')} name={sel.get_attribute('name')}")
+                page_info["selects"].append({
+                    "id": sel.get_attribute("id"),
+                    "name": sel.get_attribute("name"),
+                })
+            except Exception:
+                pass
+
+        # MUI Select'ler (dropdown gibi çalışan div'ler)
+        mui_selects = self.driver.find_elements(By.CSS_SELECTOR, "[role='button'][aria-haspopup]")
+        for i, ms in enumerate(mui_selects):
+            try:
+                if ms.is_displayed():
+                    log.info(f"  MUI-Select[{i}]: text={ms.text[:50]} class={ms.get_attribute('class')[:60]}")
+            except Exception:
+                pass
+
+        # Link'ler
+        links = self.driver.find_elements(By.TAG_NAME, "a")
+        for i, link in enumerate(links):
+            try:
+                if link.is_displayed() and link.text:
+                    href = link.get_attribute("href") or ""
+                    log.info(f"  Link[{i}]: {link.text[:50]} -> {href[:80]}")
+                    page_info["links"].append({"text": link.text[:50], "href": href[:80]})
+            except Exception:
+                pass
+
+        log.info("=" * 60)
+        log.info(f"📊 Özet: {len(page_info['inputs'])} input, {len(page_info['buttons'])} buton, {len(page_info['tables'])} tablo")
+        log.info("=" * 60)
+
+        take_screenshot(self.driver, "stock_page_explored")
+        return page_info
+
     def explore_trade_page(self) -> dict:
         """
         İşlem sayfasının yapısını keşfeder.
