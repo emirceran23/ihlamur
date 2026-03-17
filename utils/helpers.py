@@ -14,7 +14,7 @@ log = get_logger(__name__)
 
 
 def take_screenshot(driver, prefix: str = "error") -> str | None:
-    """Ekran görüntüsü alır ve dosya yolunu döner."""
+    """Ekran görüntüsü alır, Telegram'a gönderir ve dosya yolunu döner."""
     if not SCREENSHOT_ON_ERROR:
         return None
     os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
@@ -23,6 +23,8 @@ def take_screenshot(driver, prefix: str = "error") -> str | None:
     try:
         driver.save_screenshot(filepath)
         log.info(f"Screenshot kaydedildi: {filepath}")
+        # Telegram'a otomatik gönder
+        send_telegram_photo(filepath, caption=f"📸 {prefix}")
         return filepath
     except Exception as e:
         log.error(f"Screenshot alınamadı: {e}")
@@ -45,6 +47,27 @@ def send_telegram_message(message: str) -> bool:
         return resp.status_code == 200
     except Exception as e:
         log.error(f"Telegram mesaj hatası: {e}")
+        return False
+
+
+def send_telegram_photo(filepath: str, caption: str = "") -> bool:
+    """Telegram'a fotoğraf gönderir (screenshot'lar için)."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        with open(filepath, "rb") as photo:
+            resp = requests.post(
+                url,
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                files={"photo": photo},
+                timeout=30,
+            )
+        if resp.status_code == 200:
+            log.info(f"Screenshot Telegram'a gönderildi: {caption}")
+        return resp.status_code == 200
+    except Exception as e:
+        log.error(f"Telegram fotoğraf hatası: {e}")
         return False
 
 
