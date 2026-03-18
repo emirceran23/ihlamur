@@ -485,5 +485,31 @@ class Auth:
         if len(debug_msg) > 4000:
             debug_msg = debug_msg[:4000] + "\n...(kesildi)"
         send_telegram_message(debug_msg)
+
+        # Müşteri No etrafındaki HTML'i gönder (detaylı debug)
+        try:
+            musteri_html = self.driver.execute_script("""
+                // "Müşteri" içeren td/label/div bul
+                var all = document.querySelectorAll('td, label, div, span');
+                var results = [];
+                for (var i = 0; i < all.length; i++) {
+                    var txt = all[i].textContent.trim();
+                    if (txt.indexOf('Müşteri') !== -1 || txt.indexOf('T.C.') !== -1 || txt.indexOf('Kimlik') !== -1) {
+                        var parent = all[i].parentElement;
+                        if (parent) {
+                            results.push({
+                                tag: all[i].tagName,
+                                text: txt.substring(0, 50),
+                                parentHTML: parent.innerHTML.substring(0, 500)
+                            });
+                        }
+                    }
+                }
+                return JSON.stringify(results.slice(0, 3));
+            """)
+            send_telegram_message(f"🔍 <b>Müşteri No HTML:</b>\n<pre>{musteri_html[:3500]}</pre>")
+        except Exception as e:
+            send_telegram_message(f"⚠️ Müşteri HTML alınamadı: {e}")
+
         take_screenshot(self.driver, "🔍 Sayfa keşfi")
         return debug_msg
