@@ -16,6 +16,7 @@ Akış:
 
 import time
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
@@ -93,7 +94,13 @@ class Auth:
             )
 
             if musteri_input:
-                self._js_input(musteri_input, KUVEYTTURK_TC)
+                # JS focus sonrası ActionChains ile yaz (element not interactable bypass)
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center'}); arguments[0].focus(); arguments[0].click();",
+                    musteri_input
+                )
+                time.sleep(0.3)
+                ActionChains(self.driver).click(musteri_input).send_keys(KUVEYTTURK_TC).perform()
                 log.info(f"Müşteri No girildi: {KUVEYTTURK_TC[:3]}***")
                 take_screenshot(self.driver, "✅ Müşteri No girildi")
             else:
