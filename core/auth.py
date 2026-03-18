@@ -95,18 +95,26 @@ class Auth:
             )
 
             if musteri_div:
-                # contenteditable div'e tıkla, içini temizle, yazı yaz
+                # contenteditable div: focus → temizle → execCommand('insertText')
+                self.driver.execute_script("""
+                    var el = arguments[0];
+                    el.focus();
+                    el.click();
+                    // Mevcut içeriği seç ve sil
+                    document.execCommand('selectAll', false, null);
+                    document.execCommand('delete', false, null);
+                """, musteri_div)
+                time.sleep(0.3)
+
+                # execCommand('insertText') ile yaz — gerçek kullanıcı gibi
                 self.driver.execute_script("""
                     var el = arguments[0];
                     var text = arguments[1];
                     el.focus();
-                    el.click();
-                    el.textContent = text;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    el.dispatchEvent(new Event('blur', { bubbles: true }));
+                    document.execCommand('insertText', false, text);
                 """, musteri_div, KUVEYTTURK_TC)
                 time.sleep(0.5)
+
                 # Gizli IntUserName input'unu da güncelle
                 try:
                     self.driver.execute_script(
