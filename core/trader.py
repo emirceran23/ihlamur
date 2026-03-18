@@ -112,13 +112,86 @@ class Trader:
         self.daily_trade_count = 0
 
     # ──────────────────────────────────────────────────────────
-    # Menü Navigasyonu  (keşif 2026-03-18)
+    # Menü Navigasyonu  (keşif 2026-03-19)
     # ──────────────────────────────────────────────────────────
+
+    # Sayfa URL haritası — deepscan + HTML incelemesiyle doğrulandı
+    PAGE_URLS = {
+        "hisse_alis":    "/StockBuy/Index/1446",
+        "hisse_satis":   "/StockSell/Index/1447",
+        "emirlerim":     "/StockOrder/Index/1448",
+        "hisse_hareketleri": "/StockMovement/Index/1449",
+        "portfoy":       "/Portfolio/Index/1451",
+        "yatirim_hesaplari": "/InvestmentAccount/Index/1450",
+        "fon_alis":      "/FundBuy/Index/1443",
+        "fon_satis":     "/FundSell/Index/1444",
+        "emir_takip":    "/FundOrder/Index/1445",
+    }
+    BASE_URL = "https://isube.kuveytturk.com.tr"
+
+    def navigate_to_page(self, page_key: str, title_keyword: str) -> bool:
+        """
+        Sayfa URL'sine doğrudan gider (AJAX menü bypass).
+        page_key: PAGE_URLS sözlüğündeki anahtar.
+
+        KuveytTürk sayfaları cookie oturumu gerektirir;
+        oturum açıksa driver.get() ile direkt açılır.
+        Fallback: URL çalışmazsa link text ile menüden gitmeyi dener.
+        """
+        path = self.PAGE_URLS.get(page_key)
+        if not path:
+            log.error(f"Bilinmeyen sayfa anahtarı: {page_key}")
+            return False
+
+        url = self.BASE_URL + path
+        log.info(f"Sayfaya gidiliyor: {url}")
+        self.driver.get(url)
+        time.sleep(3)
+
+        # Başlık kontrolü
+        try:
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, f"//*[contains(text(), '{title_keyword}')]")
+                )
+            )
+            log.info(f"✅ Sayfa yüklendi: {self.driver.current_url}")
+            return True
+        except TimeoutException:
+            log.warning(
+                f"⚠️ '{title_keyword}' başlığı bulunamadı. "
+                f"URL: {self.driver.current_url} — menü üzerinden deneniyor..."
+            )
+            take_screenshot(self.driver, f"direct_url_failed_{page_key}")
+            # Fallback: menü üzerinden git
+            return self._navigate_via_menu(page_key, title_keyword)
+
+    def _navigate_via_menu(self, page_key: str, title_keyword: str) -> bool:
+        """
+        URL ile açılamazsa Yatırım menüsüne gidip link text ile tıklar.
+        Menü linkleri deepscan ile doğrulandı (2026-03-19):
+          "Hisse Alış", "Hisse Satış", "Portföyüm", "Yatırım Hesapları", vb.
+        """
+        menu_labels = {
+            "hisse_alis":        "Hisse Alış",
+            "hisse_satis":       "Hisse Satış",
+            "emirlerim":         "Emirlerim",
+            "hisse_hareketleri": "Hisse Hareketleri",
+            "portfoy":           "Portföyüm",
+            "yatirim_hesaplari": "Yatırım Hesapları",
+            "fon_alis":          "Fon Alış",
+            "fon_satis":         "Fon Satış",
+            "emir_takip":        "Emir Takip",
+        }
+        label = menu_labels.get(page_key)
+        if not label:
+            return False
+        return self._navigate_to_submenu_item(label, title_keyword)
 
     def navigate_to_investment_menu(self) -> bool:
         """
         Ana menüden 'Yatırım' linkine tıklar → alt menü açılır.
-        Keşif: LINK_TEXT "Yatırım" çalışıyor (ekran görüntüsü 1).
+        Keşif (2026-03-19): LINK_TEXT "Yatırım" çalışıyor.
         """
         log.info("Yatırım menüsüne gidiliyor...")
         try:
@@ -139,9 +212,9 @@ class Trader:
 
     def _navigate_to_submenu_item(self, link_text: str, page_title_keyword: str) -> bool:
         """
-        Yatırım alt menüsündeki bir öğeye gider ve sayfanın yüklendiğini doğrular.
-        link_text      : Tıklanacak linkin tam metni (ör. "Hisse Alış")
-        page_title_kw  : Yüklenen sayfada aranacak başlık anahtar kelimesi
+        Yatırım alt menüsündeki bir linke tıklar.
+        deepscan ile doğrulandı: alt menü linkleri display:none değil,
+        sadece rect=0 olabiliyorlar → JS click gerekiyor.
         """
         if not self.navigate_to_investment_menu():
             return False
@@ -232,26 +305,33 @@ class Trader:
             return False
 
         try:
-            # ── Adım 1: İşlem sayfasına git ──────────────────
-            self._navigate_to_trade_page()
+            # ── Adım 1: İşlem sayfasına git (alış/satış sayfasını direkt aç) ──
+            self._navigate_to_trade_page(order.side)
 
-            # ── Adım 2: Hisse sembolünü gir ──────────────────
-            self._enter_symbol(order.symbol)
-
-            # ── Adım 3: Alış/Satış seç ───────────────────────
+            # ── Adım 2: Alış/Satış sayfa doğrulaması ─────────
             self._select_side(order.side)
 
-            # ── Adım 4: Miktarı gir ──────────────────────────
+            # ── Adım 3: Hisse sembolünü gir ──────────────────
+            self._enter_symbol(order.symbol)
+
+            # ── Adım 4: İLERİ — sembol onayı ─────────────────
+            self._submit_order()
+
+            # ── Adım 5: 2. ekran — lot/fiyat formu ───────────
+            # İLERİ sonrası yeni form yükleniyor — bekle
+            time.sleep(2)
+
+            # ── Adım 6: Miktarı gir ──────────────────────────
             self._enter_quantity(order.quantity)
 
-            # ── Adım 5: Fiyatı gir (limit emir ise) ──────────
+            # ── Adım 7: Fiyatı gir (limit emir ise) ──────────
             if order.order_type == OrderType.LIMIT and order.price:
                 self._enter_price(order.price)
 
-            # ── Adım 6: Emri gönder ──────────────────────────
+            # ── Adım 8: GÖNDER ───────────────────────────────
             self._submit_order()
 
-            # ── Adım 7: Onay ─────────────────────────────────
+            # ── Adım 9: Onay ─────────────────────────────────
             success = self._confirm_order()
 
             if success:
@@ -297,74 +377,114 @@ class Trader:
 
         return True
 
-    def _navigate_to_trade_page(self):
+    def _navigate_to_trade_page(self, side: "OrderSide | None" = None):
         """
-        Hisse Alış sayfasına gider.
-        Yol (keşif 2026-03-18):
-          Ana Menü → Yatırım → Hisse Senedi İşlemleri → Hisse Alış
-        Sayfa başlığı: "HİSSE ALIŞ"
+        Hisse Alış veya Hisse Satış sayfasına gider.
+        side=BUY (varsayılan) → Hisse Alış
+        side=SELL             → Hisse Satış
+        Yol (keşif 2026-03-19): Yatırım menüsü → tıkla "Hisse Alış/Satış"
+        URL Main#_ kalır — AJAX ile yüklenir.
         """
-        log.info("Hisse Alış sayfasına gidiliyor...")
-        self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
+        if side is not None and side == OrderSide.SELL:
+            log.info("Hisse Satış sayfasına gidiliyor...")
+            self._navigate_to_submenu_item("Hisse Satış", "HİSSE SATIŞ")
+        else:
+            log.info("Hisse Alış sayfasına gidiliyor...")
+            self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
 
     def _enter_symbol(self, symbol: str):
         """
-        Hisse Seçiniz dropdown'undan sembol seçer.
+        Hisse sembolünü autocomplete widget'a girer.
 
-        HİSSE ALIŞ sayfası (ekran görüntüsü 4):
-          - "Hisse Seçiniz" etiketi altında <select> — "-- Seçiniz --" varsayılan.
-          - Önce dropdown'u tıkla, ardından sembolü arama/seçme işlemi yap.
-          HTML gelince name/id kesinleşecek; şimdilik label+select kombinasyonu.
+        Keşif (2026-03-19) — deepscan çıktısı:
+          #SelectedStockCode_input      → görünen metin kutusu (autocomplete)
+          #SelectedStockCode_textinput  → gizli/yardımcı input (gerçek value)
+
+        Akış:
+          1. #SelectedStockCode_input'u temizle + sembolü yaz
+          2. Autocomplete listesi açılana kadar bekle
+          3. İlk öneriyi seç (veya tam eşleşeni)
+          4. Seçim sonrası #SelectedStockCode_textinput'ta değer var mı kontrol et
         """
-        log.info(f"Sembol seçiliyor: {symbol}")
+        log.info(f"Sembol giriliyor: {symbol}")
+        time.sleep(0.5)
 
-        # Sayfanın yüklenmesini bekle
-        time.sleep(1)
-
-        symbol_select = self._find_clickable(
+        # Adım 1: Görünen autocomplete inputu bul ve sembolü yaz
+        input_el = self._find_clickable(
             selectors=[
-                # "Hisse Seçiniz" label'ının hemen altındaki select
-                (By.XPATH, "//label[contains(text(),'Hisse')]/following-sibling::select"),
-                (By.XPATH, "//label[contains(text(),'Hisse')]/following::select[1]"),
-                # Genel select selector'ları (HTML'den doğrulanacak)
-                (By.CSS_SELECTOR, "select[name*='hisse']"),
-                (By.CSS_SELECTOR, "select[name*='Hisse']"),
-                (By.CSS_SELECTOR, "select[id*='hisse']"),
-                (By.CSS_SELECTOR, "select[id*='Hisse']"),
-                # Sayfadaki tek/ilk görünür select
-                (By.XPATH, "//select[option[contains(text(),'Seçiniz')]]"),
+                (By.ID, "SelectedStockCode_input"),
+                (By.CSS_SELECTOR, "input[id*='SelectedStockCode']"),
+                (By.CSS_SELECTOR, "input.autocomplete, input[autocomplete]"),
             ],
-            description="Hisse seçim dropdown'u",
+            description="Hisse sembol input",
+            timeout=10,
         )
+        if not input_el:
+            take_screenshot(self.driver, f"symbol_input_not_found_{symbol}")
+            raise Exception("Hisse sembol input alanı bulunamadı!")
 
-        if symbol_select:
-            from selenium.webdriver.support.ui import Select as SeleniumSelect
-            sel = SeleniumSelect(symbol_select)
-            try:
-                sel.select_by_value(symbol)
-            except Exception:
-                try:
-                    sel.select_by_visible_text(symbol)
-                except Exception:
-                    # Partial match: THYAO → "THYAO - Türk Hava..." gibi metinler
-                    for opt in sel.options:
-                        if symbol.upper() in opt.text.upper():
-                            opt.click()
-                            break
-                    else:
-                        take_screenshot(self.driver, f"symbol_not_in_list_{symbol}")
-                        raise Exception(f"'{symbol}' dropdown listesinde bulunamadı!")
-            time.sleep(1)
-            log.info(f"✅ Sembol seçildi: {symbol}")
-        else:
-            take_screenshot(self.driver, f"symbol_select_not_found_{symbol}")
-            raise Exception("Hisse seçim dropdown'u bulunamadı!")
+        input_el.clear()
+        input_el.send_keys(symbol.upper())
+        log.info(f"  Sembol yazıldı: {symbol.upper()}")
+        time.sleep(1.5)  # autocomplete listesinin açılmasını bekle
+
+        # Adım 2: Açılan autocomplete listesinden eşleşeni seç
+        try:
+            # jQuery UI autocomplete → li elementleri
+            suggestions = self.driver.find_elements(
+                By.CSS_SELECTOR,
+                "ul.ui-autocomplete li.ui-menu-item, "
+                ".autocomplete-suggestions div, "
+                ".ui-autocomplete .ui-menu-item-wrapper"
+            )
+            if suggestions:
+                # Tam eşleşme ara, yoksa ilk öneriyi al
+                selected = None
+                for s in suggestions:
+                    if symbol.upper() in s.text.upper():
+                        selected = s
+                        if s.text.upper().startswith(symbol.upper()):
+                            break  # Tam prefix eşleşmesi — ideal
+                if selected:
+                    try:
+                        selected.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", selected)
+                    log.info(f"  Öneri seçildi: {selected.text.strip()[:40]}")
+                    time.sleep(0.5)
+                else:
+                    # Liste açıldı ama eşleşme yok → ENTER ile ilk öneriye git
+                    input_el.send_keys(Keys.ARROW_DOWN)
+                    time.sleep(0.3)
+                    input_el.send_keys(Keys.RETURN)
+                    log.info(f"  Öneri listesi açıktı, ENTER ile seçildi.")
+                    time.sleep(0.5)
+            else:
+                # Liste gelmedi → doğrudan ENTER dene
+                input_el.send_keys(Keys.RETURN)
+                log.warning(f"  Autocomplete listesi gelmedi, ENTER denendi.")
+                time.sleep(0.5)
+        except Exception as e:
+            log.warning(f"  Autocomplete seçim hatası: {e} — devam ediliyor.")
+
+        # Adım 3: Seçim doğrulama — gizli input'ta değer var mı?
+        try:
+            hidden = self.driver.find_element(By.ID, "SelectedStockCode_textinput")
+            val = hidden.get_attribute("value") or ""
+            if val:
+                log.info(f"✅ Sembol seçildi (hidden value): {val}")
+            else:
+                log.warning(f"⚠️ Gizli input boş — sembol seçimi doğrulanamadı.")
+                take_screenshot(self.driver, f"symbol_hidden_empty_{symbol}")
+        except Exception:
+            log.debug("Gizli sembol input kontrolü atlandı.")
+
 
     def _select_side(self, side: OrderSide):
         """
         Alış/Satış ayrımı HİSSE ALIŞ ve HİSSE SATIŞ olarak ayrı sayfalarda.
-        Bu metod yalnızca _navigate_to_trade_page'in hangi sayfayı açtığını
-        doğrular — yanlış sayfadaysa yönlendirir.
+        BUY: _navigate_to_trade_page() zaten Hisse Alış sayfasını açtı — sadece doğrula.
+        SELL: Hisse Satış sayfasına git.
         """
         if side == OrderSide.BUY:
             # Zaten Hisse Alış sayfasındayız, kontrol et
@@ -440,39 +560,39 @@ class Trader:
 
     def _submit_order(self):
         """
-        İLERİ → ardından gelen onay/gönder butonuna basar.
-        HİSSE ALIŞ akışı 2 adımlı:
-          Adım 1: Hisse seç → İLERİ
-          Adım 2: Lot/fiyat gir → GÖNDER (HTML gelince isim kesinleşecek)
+        İLERİ butonuna basar.
+
+        Keşif (2026-03-19): deepscan çıktısında buton text = "İLERİ"
+        Adım 1 (sembol seçimi) → İLERİ → Adım 2 (lot/fiyat)
+        Adım 2 (lot/fiyat dolu) → İLERİ (veya GÖNDER) → onay
         """
-        log.info("İLERİ/GÖNDER butonuna basılıyor...")
-        submit_btn = self._find_clickable(
+        log.info("İLERİ butonuna basılıyor...")
+        ileri_btn = self._find_clickable(
             selectors=[
-                # Adım 2 — Gönder
-                (By.XPATH, "//input[@type='submit' and contains(@value,'GÖNDER')]"),
-                (By.XPATH, "//input[@type='submit' and contains(@value,'Gönder')]"),
-                (By.XPATH, "//button[contains(text(),'GÖNDER')]"),
-                (By.XPATH, "//button[contains(text(),'Gönder')]"),
-                # Adım 1 — İLERİ (sembol seçim ekranında)
                 (By.XPATH, "//input[@type='submit' and contains(@value,'İLERİ')]"),
-                (By.XPATH, "//input[@type='submit' and contains(@value,'İleri')]"),
+                (By.XPATH, "//input[@type='submit' and contains(@value,'ILERI')]"),
                 (By.XPATH, "//button[normalize-space()='İLERİ']"),
-                (By.XPATH, "//button[normalize-space()='İleri']"),
+                (By.XPATH, "//button[normalize-space()='ILERI']"),
+                (By.XPATH, "//input[@type='button' and contains(@value,'İLERİ')]"),
+                # 2. adım — Gönder butonu (form submit)
+                (By.XPATH, "//input[@type='submit' and contains(@value,'GÖNDER')]"),
+                (By.XPATH, "//button[normalize-space()='GÖNDER']"),
                 (By.CSS_SELECTOR, "input[type='submit']"),
                 (By.CSS_SELECTOR, "button[type='submit']"),
             ],
-            description="İLERİ / GÖNDER butonu",
+            description="İLERİ butonu",
+            timeout=8,
         )
-        if submit_btn:
+        if ileri_btn:
             try:
-                submit_btn.click()
+                ileri_btn.click()
             except Exception:
-                self.driver.execute_script("arguments[0].click();", submit_btn)
+                self.driver.execute_script("arguments[0].click();", ileri_btn)
+            log.info(f"✅ Buton tıklandı: {ileri_btn.get_attribute('value') or ileri_btn.text}")
             time.sleep(2)
-            log.info("✅ Form gönderildi.")
         else:
-            take_screenshot(self.driver, "submit_not_found")
-            raise Exception("İLERİ/GÖNDER butonu bulunamadı!")
+            take_screenshot(self.driver, "ileri_not_found")
+            raise Exception("İLERİ butonu bulunamadı!")
 
     def _confirm_order(self) -> bool:
         """
@@ -537,7 +657,7 @@ class Trader:
 
         try:
             # ── Portföyüm sayfasına git ───────────────────────
-            ok = self._navigate_to_submenu_item("Portföyüm", "PORTFÖYÜM")
+            ok = self.navigate_to_page("portfoy", "PORTFÖYÜM")
             if not ok:
                 log.error("Portföyüm sayfasına gidilemedi!")
                 return []
@@ -714,7 +834,7 @@ class Trader:
         log.info("🔍 HİSSE ALIŞ sayfası keşfi başlıyor...")
         log.info("=" * 60)
 
-        self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
+        self.navigate_to_page("hisse_alis", "HİSSE ALIŞ")
         take_screenshot(self.driver, "hisse_alis_explore")
 
         page_info = {

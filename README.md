@@ -11,11 +11,13 @@ Telegram üzerinden tamamen uzaktan yönetilebilir.
 |---------|-------|--------|
 | KuveytTürk girişi | ✅ Tamamlandı | CAPTCHA + mobil onay dahil |
 | Cookie/session yönetimi | ✅ Tamamlandı | 30 dk'da bir yenilenir |
-| Telegram komut botu | ✅ Tamamlandı | 9 komut |
-| Explore (uzaktan kumanda) | ✅ Tamamlandı | Tıkla/yaz/scroll/JS |
+| Telegram komut botu | ✅ Tamamlandı | 11 komut |
+| Explore (uzaktan kumanda) | ✅ Tamamlandı | Tıkla/yaz/scroll/JS/deepscan/html |
 | Ana menü keşfi | ✅ Tamamlandı | "Yatırım" linki doğrulandı |
 | Yatırım alt menü keşfi | ✅ Tamamlandı | Hisse Alış/Satış/Portföy sayfaları görüldü |
-| Hisse senedi alım/satım | ⬜ Yapılacak | Hisse select HTML'i bekleniyor |
+| `/al` ve `/sat` komutları | ✅ Eklendi | Onay mekanizmalı, 2 adımlı form akışı |
+| Adım 2 selector doğrulaması | ⬜ Yapılacak | Lot/fiyat formu HTML'i bekleniyor |
+| Portföy pozisyon tablosu | ⬜ Yapılacak | Portföy boş — tablo yapısı bilinmiyor |
 | Strateji motoru | ⬜ Yapılacak | — |
 
 ---
@@ -93,11 +95,25 @@ Long-polling ile komut dinler. `threading.Lock` ile aynı anda tek ağır işlem
 | `/explore` | İnteraktif uzaktan kumanda modu |
 | `/yatırım` | Yatırım menüsüne git, alt linkleri listele |
 | `/portföy` | PORTFÖYÜM sayfası — bakiye özeti |
+| `/al THYAO 10 320.50` | Hisse alış emri — onay ister, sonra gönderir |
+| `/sat THYAO 10 325.00` | Hisse satış emri — onay ister, sonra gönderir |
 | `/cancel` | Botu durdur (SIGINT → `finally` bloğu) |
+
+**`/al` ve `/sat` akışı:**
+```
+/al THYAO 10 320.50
+  → 🟢 EMİR ONAYI — ALIŞ
+     Sembol: THYAO | Adet: 10 lot | Fiyat: 320,50 TL | Toplam: 3.205,00 TL
+     Onaylamak için: evet / İptal için: hayır
+evet
+  → ⏳ Emir gönderiliyor...
+  → ✅ Emir Gönderildi!
+```
 
 **Loop / çakışma korumaları:**
 - `/` ile başlayan mesajlar CAPTCHA polling'ine gitmez
 - Explore modu aktifken serbest mesajlar da CAPTCHA'ya gitmez
+- Bekleyen emir varken `evet/hayır` cevabı emir onay akışına gider
 - `/cancel`: sadece SIGINT gönderir, temizliği `main.py`'nin `finally` bloğu yapar (çift logout olmaz)
 
 ### 4. /explore — İnteraktif Uzaktan Kumanda

@@ -91,6 +91,10 @@ class TelegramBot:
         # Explore modu
         self._explore_active = False
 
+        # Bekleyen emir onayı (evet/hayır bekleniyor)
+        self._pending_order = None   # Order nesnesi veya None
+        self._pending_msg: str = ""  # Onay mesajı önizlemesi
+
     # ──────────────────────────────────────────────────────────
     #  BAŞLAT / DURDUR
     # ──────────────────────────────────────────────────────────
@@ -179,6 +183,16 @@ class TelegramBot:
             ).start()
             return
 
+        # ── Bekleyen emir onayı: evet/hayır/iptal bekleniyor
+        if self._pending_order is not None and not text.startswith("/"):
+            threading.Thread(
+                target=self._run_with_lock,
+                args=("/emir-onayi", lambda: self._handle_order_confirm(text)),
+                daemon=True,
+                name="order-confirm",
+            ).start()
+            return
+
         # Komut değilse atla (CAPTCHA polling'ine bırak)
         if not text.startswith("/"):
             return
@@ -202,6 +216,8 @@ class TelegramBot:
             "/yatırım": self._cmd_yatirim,
             "/portfoy": self._cmd_portfoy,
             "/portföy": self._cmd_portfoy,
+            "/al": lambda: self._cmd_al(text),
+            "/sat": lambda: self._cmd_sat(text),
             "/cancel": self._cmd_cancel,
             "/help": self._cmd_help,
             "/start": self._cmd_help,
@@ -215,7 +231,8 @@ class TelegramBot:
             return
 
         # Lock gerektirmeyen komutlar
-        no_lock = ("/status", "/screenshot", "/ss", "/help", "/start", "/cancel")
+        no_lock = ("/status", "/screenshot", "/ss", "/help", "/start", "/cancel",
+                   "/al", "/sat")  # al/sat sadece onay kuyruğuna ekler, tarayıcıya dokunmaz
         if command in no_lock:
             threading.Thread(
                 target=handler, daemon=True, name=f"cmd-{command}"
@@ -437,13 +454,199 @@ class TelegramBot:
             "/status — Oturum durumu\n"
             "/screenshot — Ekran görüntüsü\n\n"
             "<b>Yatırım:</b>\n"
-            "/yatırım — Yatırım menüsüne git, alt menüleri listele\n\n"
+            "/yatırım — Yatırım menüsüne git, alt menüleri listele\n"
+            "/portföy — Portföy bakiye özeti\n"
+            "/al THYAO 10 320.50 — Hisse alış emri ver\n"
+            "/sat THYAO 10 325.00 — Hisse satış emri ver\n\n"
             "<b>Keşif:</b>\n"
             "/explore — İnteraktif sayfa keşfi\n\n"
             "<b>Sistem:</b>\n"
             "/cancel — Botu durdur\n"
             "/help — Bu mesaj"
         )
+
+    # ──────────────────────────────────────────────────────────
+    #  KOMUT HANDLER'LARI — HİSSE EMİRLERİ
+    # ──────────────────────────────────────────────────────────
+    def _cmd_al(self, text: str):
+        """
+        /al SEMBOL ADET [FİYAT]
+        Örnekler:
+          /al THYAO 10 320.50   → THYAO 10 lot limit @ 320,50 TL
+          /al THYAO 10          → THYAO 10 lot piyasa emri
+        """
+        self._cmd_al_sat_impl(text, is_buy=True)
+
+    def _cmd_sat(self, text: str):
+        """
+        /sat SEMBOL ADET [FİYAT]
+        Örnekler:
+          /sat THYAO 10 325.00  → THYAO 10 lot limit @ 325,00 TL
+          /sat THYAO 10         → THYAO 10 lot piyasa emri
+        """
+        self._cmd_al_sat_impl(text, is_buy=False)
+
+    def _cmd_al_sat_impl(self, text: str, is_buy: bool):
+        """
+        Ortak alış/satış parser + onay akışı.
+        Komut argümanları: SEMBOL ADET [FİYAT]
+        """
+        from core.trader import Order, OrderSide, OrderType
+
+        side_str = "ALIŞ" if is_buy else "SATIŞ"
+        side = OrderSide.BUY if is_buy else OrderSide.SELL
+
+        # ── Argümanları ayrıştır ──────────────────────────────
+        parts = text.strip().split()
+        # parts[0] = /al veya /sat
+
+        if len(parts) < 3:
+            send_telegram_message(
+                f"⚠️ Kullanım:\n"
+                f"<code>/{'al' if is_buy else 'sat'} SEMBOL ADET [FİYAT]</code>\n\n"
+                f"Örnekler:\n"
+                f"<code>/{'al' if is_buy else 'sat'} THYAO 10 320.50</code>\n"
+                f"<code>/{'al' if is_buy else 'sat'} THYAO 10</code>  (piyasa emri)"
+            )
+            return
+
+        symbol = parts[1].upper().strip()
+
+        try:
+            quantity = int(parts[2])
+        except ValueError:
+            send_telegram_message(f"❌ Geçersiz adet: <code>{parts[2]}</code>")
+            return
+
+        price = None
+        order_type = OrderType.MARKET
+        if len(parts) >= 4:
+            try:
+                # Hem 320.50 hem 320,50 formatını destekle
+                price = float(parts[3].replace(",", "."))
+                order_type = OrderType.LIMIT
+            except ValueError:
+                send_telegram_message(f"❌ Geçersiz fiyat: <code>{parts[3]}</code>")
+                return
+
+        # ── Temel doğrulamalar ────────────────────────────────
+        if len(symbol) < 2 or len(symbol) > 6:
+            send_telegram_message(
+                f"❌ Geçersiz hisse sembolü: <code>{symbol}</code>\n"
+                "Örnek: THYAO, GARAN, EREGL"
+            )
+            return
+
+        if quantity <= 0:
+            send_telegram_message(f"❌ Adet 0'dan büyük olmalı: <code>{quantity}</code>")
+            return
+
+        if price is not None and price <= 0:
+            send_telegram_message(f"❌ Fiyat 0'dan büyük olmalı: <code>{price}</code>")
+            return
+
+        # ── Emir nesnesi oluştur ──────────────────────────────
+        order = Order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            price=price,
+            order_type=order_type,
+        )
+
+        # ── Onay mesajı ───────────────────────────────────────
+        if price:
+            price_display = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            total = quantity * price
+            total_display = f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            price_line = f"Fiyat    : <b>{price_display} TL</b> (limitli)\nToplam   : <b>{total_display} TL</b>"
+        else:
+            price_line = "Fiyat    : <b>PİYASA</b> (anlık fiyat)"
+
+        icon = "🟢" if is_buy else "🔴"
+        onay_msg = (
+            f"{icon} <b>EMİR ONAYI — {side_str}</b>\n"
+            f"──────────────────────\n"
+            f"Sembol   : <b>{symbol}</b>\n"
+            f"İşlem    : <b>{side_str}</b>\n"
+            f"Adet     : <b>{quantity:,} lot</b>\n"
+            f"{price_line}\n"
+            f"──────────────────────\n"
+            f"Onaylamak için: <b>evet</b>\n"
+            f"İptal için: <b>hayır</b>"
+        )
+
+        self._pending_order = order
+        self._pending_msg = onay_msg
+        send_telegram_message(onay_msg)
+        log.info(f"Emir onay bekleniyor: {order}")
+
+    def _handle_order_confirm(self, text: str):
+        """
+        Bekleyen emir için evet/hayır cevabını işler.
+        """
+        from core.trader import Trader
+
+        lower = text.strip().lower()
+
+        if lower in ("evet", "e", "yes", "y", "onayla", "ok"):
+            order = self._pending_order
+            self._pending_order = None
+            self._pending_msg = ""
+
+            if order is None:
+                send_telegram_message("⚠️ Onaylanacak emir bulunamadı.")
+                return
+
+            side_str = "ALIŞ" if order.side.value == "buy" else "SATIŞ"
+            send_telegram_message(
+                f"⏳ <b>Emir gönderiliyor...</b>\n"
+                f"{order.symbol} {side_str} {order.quantity:,} lot"
+            )
+            log.info(f"Emir onaylandı, gönderiliyor: {order}")
+
+            try:
+                trader = Trader(self.driver)
+                success = trader.place_order(order)
+                if success:
+                    if order.price:
+                        price_display = f"{order.price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                        result_line = f"@ {price_display} TL"
+                    else:
+                        result_line = "@ PİYASA FİYATI"
+                    send_telegram_message(
+                        f"✅ <b>Emir Gönderildi!</b>\n"
+                        f"{order.symbol} {side_str} {order.quantity:,} lot {result_line}"
+                    )
+                    take_screenshot(self.driver, f"✅ Emir {order.symbol}")
+                else:
+                    send_telegram_message(
+                        f"❌ <b>Emir başarısız.</b>\n"
+                        f"{order.symbol} {side_str} {order.quantity:,} lot\n"
+                        f"Detay için /screenshot gönderin."
+                    )
+            except Exception as e:
+                log.error(f"Emir gönderilemedi: {e}")
+                send_telegram_message(
+                    f"❌ <b>Emir hatası:</b>\n{e}\n\n"
+                    f"Ekran için: /screenshot"
+                )
+
+        elif lower in ("hayır", "hayir", "h", "no", "n", "iptal", "vazgeç", "vazgec"):
+            order = self._pending_order
+            self._pending_order = None
+            self._pending_msg = ""
+            sym = order.symbol if order else "?"
+            send_telegram_message(f"🚫 Emir iptal edildi: <b>{sym}</b>")
+            log.info("Emir iptal edildi (kullanıcı).")
+
+        else:
+            # Anlaşılmayan cevap — yeniden sor
+            send_telegram_message(
+                f"❓ Anlaşılamadı: <code>{text}</code>\n\n"
+                f"{self._pending_msg}\n\n"
+                "Onaylamak için <b>evet</b>, iptal için <b>hayır</b> yazın."
+            )
 
     # ──────────────────────────────────────────────────────────
     #  EXPLORE MODU — İNTERAKTİF UZAKTAN KUMANDA
