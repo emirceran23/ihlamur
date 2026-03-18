@@ -95,34 +95,30 @@ class Auth:
             )
 
             if musteri_div:
-                # contenteditable div: focus → temizle → execCommand('insertText')
-                self.driver.execute_script("""
-                    var el = arguments[0];
-                    el.focus();
-                    el.click();
-                    // Mevcut içeriği seç ve sil
-                    document.execCommand('selectAll', false, null);
-                    document.execCommand('delete', false, null);
-                """, musteri_div)
-                time.sleep(0.3)
-
-                # execCommand('insertText') ile yaz — gerçek kullanıcı gibi
+                # KuveytTürk güvenlik: charDiff > 1 ise alert veriyor.
+                # Her karakteri tek tek insertText ile yazıp, sonra blur tetikliyoruz.
+                # blur event'i updateCustomerNumberMapping() çağırarak IntUserName'i dolduruyor.
                 self.driver.execute_script("""
                     var el = arguments[0];
                     var text = arguments[1];
+
                     el.focus();
-                    document.execCommand('insertText', false, text);
+                    el.click();
+
+                    // Mevcut içeriği temizle
+                    document.execCommand('selectAll', false, null);
+                    document.execCommand('delete', false, null);
+
+                    // Her karakteri tek tek yaz (charDiff > 1 korumasını bypass)
+                    for (var i = 0; i < text.length; i++) {
+                        document.execCommand('insertText', false, text[i]);
+                    }
+
+                    // blur tetikle — updateCustomerNumberMapping() çalışsın
+                    el.dispatchEvent(new Event('blur', { bubbles: true }));
                 """, musteri_div, KUVEYTTURK_TC)
                 time.sleep(0.5)
 
-                # Gizli IntUserName input'unu da güncelle
-                try:
-                    self.driver.execute_script(
-                        "document.getElementById('IntUserName').value = arguments[0];",
-                        KUVEYTTURK_TC
-                    )
-                except Exception:
-                    pass
                 log.info(f"Müşteri No girildi: {KUVEYTTURK_TC[:3]}***")
                 take_screenshot(self.driver, "✅ Müşteri No girildi")
             else:
