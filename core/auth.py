@@ -398,6 +398,10 @@ class Auth:
                     text = msg.get("text", "").strip()
 
                     if chat_id == str(TELEGRAM_CHAT_ID) and text:
+                        # '/' ile başlayan mesajlar komut — CAPTCHA değil!
+                        if text.startswith("/"):
+                            log.debug(f"Komut mesajı atlandı (CAPTCHA değil): {text}")
+                            continue
                         log.info(f"CAPTCHA kodu alındı: {text}")
                         send_telegram_message(f"✅ CAPTCHA kodu alındı: <b>{text}</b>")
                         return text

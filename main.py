@@ -2,6 +2,11 @@
 """
 İhlamur - KuveytTürk İnternet Şubesi Otomasyon Botu
 Ana giriş noktası.
+
+Kullanım:
+  python main.py --action serve       # Telegram botu başlat (önerilen)
+  python main.py --action login-test  # Tek seferlik giriş testi
+  python main.py --action explore     # Sayfa keşif modu
 """
 
 import argparse
@@ -10,6 +15,7 @@ import time
 from core.browser import Browser
 from core.auth import Auth
 from core.session import SessionManager
+from core.telegram_bot import TelegramBot
 from core.trader import Trader, Order, OrderSide, OrderType
 from utils.logger import get_logger
 from utils.helpers import send_telegram_message
@@ -24,8 +30,8 @@ def parse_args():
     parser.add_argument(
         "--action",
         choices=["buy", "sell", "portfolio", "explore", "login-test", "serve"],
-        default="login-test",
-        help="Yapılacak işlem (varsayılan: login-test, serve: sürekli çalışma)",
+        default="serve",
+        help="Yapılacak işlem (varsayılan: serve)",
     )
     parser.add_argument("--symbol", type=str, help="Hisse sembolü (ör: THYAO)")
     parser.add_argument("--quantity", type=int, help="Adet")
@@ -44,13 +50,11 @@ def login_with_session(auth: Auth, session: SessionManager) -> bool:
     Önce cookie ile oturum geri yükleme dener.
     Başarısız olursa tam login akışı çalışır.
     """
-    # 1) Cookie'lerle oturumu geri yüklemeyi dene
     log.info("🔄 Kayıtlı oturum kontrol ediliyor...")
     if session.try_restore_session():
         auth.is_logged_in = True
         return True
 
-    # 2) Cookie başarısız → tam giriş yap
     log.info("🔑 Yeni giriş yapılıyor...")
     auth.login()
     return auth.is_logged_in
@@ -82,11 +86,47 @@ def main():
             log.info(f"URL: {driver.current_url}")
             log.info(f"Title: {driver.title}")
 
-            page_info = auth.explore_page()
+            auth.explore_page()
             log.info("Keşif tamamlandı.")
             return
 
-        # ── Giriş (session-aware) ─────────────────────────────
+        # ── Serve Modu: Telegram bot + keep-alive ─────────────
+        if args.action == "serve":
+            log.info("🤖 Serve modu — Telegram botu başlatılıyor...")
+
+            telegram_bot = TelegramBot(auth=auth, session=session, driver=driver)
+            telegram_bot.start()
+
+            send_telegram_message(
+                "🟢 <b>İhlamur Aktif</b>\n\n"
+                "Komutlar:\n"
+                "/login — Giriş yap\n"
+                "/relogin — Sıfırdan giriş\n"
+                "/logout — Çıkış\n"
+                "/status — Durum\n"
+                "/screenshot — Ekran görüntüsü\n"
+                "/help — Yardım"
+            )
+
+            try:
+                # Ana thread burada bekler — Ctrl+C ile çıkılır.
+                # Tüm iş Telegram komutlarıyla yapılır, loop yok.
+                while True:
+                    time.sleep(60)
+            except KeyboardInterrupt:
+                log.info("Serve modu durduruluyor (Ctrl+C)...")
+            finally:
+                telegram_bot.stop()
+                session.stop_keepalive()
+                if auth.is_logged_in:
+                    try:
+                        auth.logout()
+                    except Exception:
+                        pass
+                send_telegram_message("🔴 İhlamur durduruldu.")
+            return
+
+        # ── Tek seferlik işlemler: önce giriş ─────────────────
         try:
             login_with_session(auth, session)
         except Exception as e:
@@ -109,40 +149,6 @@ def main():
                 f"📁 Cookie dosyası: {'var' if info['cookie_file_exists'] else 'yok'}"
             )
             auth.logout()
-            return
-
-        # ── Serve Modu: Oturumu canlı tut ─────────────────────
-        if args.action == "serve":
-            log.info("🔄 Serve modu — oturum canlı tutulacak...")
-            send_telegram_message(
-                "🟢 <b>İhlamur Serve Modu Aktif</b>\n"
-                "Oturum canlı tutulacak, sona erdiğinde yeniden giriş yapılacak."
-            )
-
-            def on_expired():
-                """Oturum sona erdiğinde yeniden giriş yap."""
-                log.info("🔄 Yeniden giriş yapılıyor (oturum sona erdi)...")
-                auth.is_logged_in = False
-                auth.login()
-                if auth.is_logged_in:
-                    log.info("✅ Yeniden giriş başarılı!")
-                else:
-                    raise Exception("Yeniden giriş başarısız!")
-
-            session.start_keepalive(on_session_expired=on_expired)
-
-            try:
-                # Ana thread burada bekle (Ctrl+C ile çıkılabilir)
-                while True:
-                    time.sleep(30)
-                    if not auth.is_logged_in:
-                        log.warning("Oturum kaybedildi, bekleniyor...")
-            except KeyboardInterrupt:
-                log.info("Serve modu durduruluyor (Ctrl+C)...")
-                send_telegram_message("🔴 İhlamur Serve modu durduruldu (Ctrl+C).")
-            finally:
-                session.stop_keepalive()
-                auth.logout()
             return
 
         # ── Portföy ───────────────────────────────────────────
