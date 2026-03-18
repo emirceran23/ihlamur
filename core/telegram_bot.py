@@ -774,7 +774,7 @@ class TelegramBot:
         Selector → element:
           #id        → By.ID
           //xpath    → By.XPATH
-          "metin"    → By.LINK_TEXT → PARTIAL_LINK_TEXT
+          "metin"    → By.LINK_TEXT → buton/input text → PARTIAL_LINK_TEXT
           'metin'    → aynı
           diğer      → By.CSS_SELECTOR
         """
@@ -790,10 +790,35 @@ class TelegramBot:
             s.startswith("'") and s.endswith("'")
         ):
             link_text = s.strip("\"'")
+
+            # 1. Önce <a> linki dene
             try:
                 return self.driver.find_element(By.LINK_TEXT, link_text)
             except NoSuchElementException:
+                pass
+
+            # 2. Buton (button text veya input value) — İLERİ, GÖNDER, TAMAM vb.
+            try:
+                return self.driver.find_element(
+                    By.XPATH,
+                    f"//button[normalize-space()='{link_text}'] | "
+                    f"//input[@type='submit' and @value='{link_text}'] | "
+                    f"//input[@type='button' and @value='{link_text}']"
+                )
+            except NoSuchElementException:
+                pass
+
+            # 3. Partial link text fallback
+            try:
                 return self.driver.find_element(By.PARTIAL_LINK_TEXT, link_text)
+            except NoSuchElementException:
+                pass
+
+            # 4. XPath — herhangi bir element (span, div, a) içinde metin
+            return self.driver.find_element(
+                By.XPATH,
+                f"//*[normalize-space()='{link_text}']"
+            )
 
         return self.driver.find_element(By.CSS_SELECTOR, s)
 

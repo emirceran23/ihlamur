@@ -34,6 +34,7 @@ class SessionManager:
         self._last_save_time: float = 0
         self._session_start: float = 0
         self._keepalive_thread: threading.Thread | None = None
+        self._popup_watcher_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         os.makedirs(SESSION_DIR, exist_ok=True)
 
@@ -222,6 +223,7 @@ class SessionManager:
     def start_keepalive(self, on_session_expired=None):
         """
         Arka planda oturum canlılık kontrolü başlatır.
+        Ayrıca popup watcher'ı da başlatır (Zaman Aşımı popup'ı otomatik kapatma).
         
         Args:
             on_session_expired: Oturum sona erdiğinde çağrılacak callback.
@@ -232,6 +234,9 @@ class SessionManager:
             return
 
         self._stop_event.clear()
+
+        # Popup watcher'ı da başlat
+        self.start_popup_watcher()
 
         def _keepalive_loop():
             log.info(
@@ -336,4 +341,76 @@ class SessionManager:
                 self._keepalive_thread is not None
                 and self._keepalive_thread.is_alive()
             ),
+            "popup_watcher_running": (
+                self._popup_watcher_thread is not None
+                and self._popup_watcher_thread.is_alive()
+            ),
         }
+
+    # ──────────────────────────────────────────────────────────
+    #  ZAMAN AŞIMI POPUP WATCHER
+    # ──────────────────────────────────────────────────────────
+    def start_popup_watcher(self):
+        """
+        Arka planda "Zaman Aşımı — Ek süre ister misiniz?" popup'ını
+        izler ve otomatik EVET'e basar.
+
+        KuveytTürk İnternet Şubesi oturum süre aşımına yaklaştığında
+        modal bir dialog açar:
+          - Başlık: "Zaman Aşımı"
+          - İçerik: "Kalan Süre: 30 — Oturumunuz kapanmak üzere. Ek süre ister misiniz?"
+          - Butonlar: EVET, HAYIR
+        """
+        if self._popup_watcher_thread and self._popup_watcher_thread.is_alive():
+            log.debug("Popup watcher zaten çalışıyor.")
+            return
+
+        def _popup_loop():
+            log.info("👁 Popup watcher başlatıldı (10s aralık).")
+            while not self._stop_event.is_set():
+                self._stop_event.wait(10)
+                if self._stop_event.is_set():
+                    break
+                try:
+                    self._dismiss_timeout_popup()
+                except Exception as e:
+                    log.debug(f"Popup kontrol hatası (önemsiz): {e}")
+            log.info("👁 Popup watcher durduruldu.")
+
+        self._popup_watcher_thread = threading.Thread(
+            target=_popup_loop, daemon=True, name="popup-watcher"
+        )
+        self._popup_watcher_thread.start()
+
+    def _dismiss_timeout_popup(self):
+        """
+        Zaman Aşımı popup'ı açıksa EVET butonuna basar.
+        Popup yoksa sessizce döner.
+        """
+        try:
+            # Modal dialog içindeki EVET butonu — birkaç olası selector
+            evet_btn = self.driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class,'modal') or contains(@class,'dialog') "
+                "or contains(@class,'popup') or contains(@class,'bootbox')]"
+                "//button[normalize-space()='EVET'] | "
+                "//div[contains(@class,'modal') or contains(@class,'dialog') "
+                "or contains(@class,'popup') or contains(@class,'bootbox')]"
+                "//a[normalize-space()='EVET'] | "
+                "//button[normalize-space()='EVET'] | "
+                "//a[normalize-space()='EVET']"
+            )
+            for btn in evet_btn:
+                if btn.is_displayed():
+                    try:
+                        btn.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    log.info("⏰ Zaman Aşımı popup'ı otomatik kapatıldı (EVET).")
+                    send_telegram_message(
+                        "⏰ <b>Oturum süresi uzatıldı</b>\n"
+                        "Zaman Aşımı popup'ı otomatik kapatıldı."
+                    )
+                    return
+        except Exception:
+            pass
