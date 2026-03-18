@@ -828,7 +828,13 @@ class TelegramBot:
             el = self._explore_find_element(selector)
             tag = el.tag_name
             el_id = el.get_attribute("id") or ""
-            el_text = (el.text or "")[:30]
+            el_text = (el.text or el.get_attribute("value") or "")[:30]
+
+            # Ekran dışında olabilir — scroll into view
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'});", el
+            )
+            time.sleep(0.3)
 
             try:
                 el.click()
@@ -852,6 +858,41 @@ class TelegramBot:
         try:
             el = self._explore_find_element(selector)
 
+            # <select> elementi ise Select class'ı ile seç
+            if el.tag_name.lower() == "select":
+                from selenium.webdriver.support.ui import Select as SeleniumSelect
+                sel = SeleniumSelect(el)
+                # Önce visible text ile prefix eşleşmesi dene
+                matched = False
+                for opt in sel.options:
+                    if opt.text.strip().upper().startswith(value.upper()):
+                        sel.select_by_visible_text(opt.text.strip())
+                        matched = True
+                        send_telegram_message(
+                            f"✅ Seçildi: <code>{selector}</code> ← <code>{opt.text.strip()}</code>"
+                        )
+                        break
+                if not matched:
+                    # Contains dene
+                    for opt in sel.options:
+                        if value.upper() in opt.text.strip().upper():
+                            sel.select_by_visible_text(opt.text.strip())
+                            matched = True
+                            send_telegram_message(
+                                f"✅ Seçildi: <code>{selector}</code> ← <code>{opt.text.strip()}</code>"
+                            )
+                            break
+                if not matched:
+                    opts_list = [o.text.strip() for o in sel.options[:15]]
+                    send_telegram_message(
+                        f"❌ '{value}' dropdown'da bulunamadı.\n"
+                        f"Mevcut seçenekler: {opts_list}"
+                    )
+                time.sleep(1)
+                take_screenshot(self.driver, "⌨️ Select sonrası")
+                return
+
+            # Normal input/textarea
             self.driver.execute_script(
                 """
                 var el = arguments[0], text = arguments[1];

@@ -394,43 +394,110 @@ class Trader:
 
     def _enter_symbol(self, symbol: str):
         """
-        Hisse sembolünü autocomplete widget'a girer.
+        Hisse sembolünü seçer.
 
-        Keşif (2026-03-19) — deepscan çıktısı:
-          #SelectedStockCode_input      → görünen metin kutusu (autocomplete)
-          #SelectedStockCode_textinput  → gizli/yardımcı input (gerçek value)
+        Keşif (2026-03-19) — ekran görüntüsü:
+          Hisse Seçiniz bölümünde bir <select> dropdown var.
+          Seçenekler: "-- Seçiniz --", "ALBRK-E", "THYAO-E", vb.
+          #SelectedStockCode_textinput → <select> elementi (veya hidden input)
+          #SelectedStockCode_input     → görünür widget (autocomplete veya <select>)
 
-        Akış:
-          1. #SelectedStockCode_input'u temizle + sembolü yaz
-          2. Autocomplete listesi açılana kadar bekle
-          3. İlk öneriyi seç (veya tam eşleşeni)
-          4. Seçim sonrası #SelectedStockCode_textinput'ta değer var mı kontrol et
+        Ekran görüntüsünde "ALBRK-E" formatında seçenekler var.
+        Kullanıcı "ALBRK" yazarsa "ALBRK" ile başlayan ilk opsiyonu seç.
+
+        Strateji:
+          1. Önce <select> elementi bul
+          2. Select class ile visible_text veya value ile seç
+          3. <select> yoksa autocomplete input dene
+          4. Seçim sonrası fiyat tablosunun yüklenmesini bekle
         """
         log.info(f"Sembol giriliyor: {symbol}")
         time.sleep(0.5)
+        symbol_upper = symbol.upper().strip()
 
-        # Adım 1: Görünen autocomplete inputu bul ve sembolü yaz
+        # ── Yol 1: <select> dropdown ─────────────────────────
+        select_el = None
+        for by, val in [
+            (By.ID, "SelectedStockCode_textinput"),
+            (By.ID, "SelectedStockCode_input"),
+            (By.CSS_SELECTOR, "select[id*='SelectedStockCode']"),
+            (By.CSS_SELECTOR, "select[name*='SelectedStockCode']"),
+            (By.CSS_SELECTOR, "select[id*='Stock']"),
+        ]:
+            try:
+                el = self.driver.find_element(by, val)
+                if el.tag_name.lower() == "select":
+                    select_el = el
+                    log.info(f"  <select> bulundu: {by}={val}")
+                    break
+            except Exception:
+                continue
+
+        if select_el:
+            from selenium.webdriver.support.ui import Select as SeleniumSelect
+            sel = SeleniumSelect(select_el)
+
+            # Tüm seçenekleri listele, symbol ile eşleşeni bul
+            options = [(o.text.strip(), o.get_attribute("value") or "") for o in sel.options]
+            log.info(f"  Dropdown seçenekleri ({len(options)}): {[o[0] for o in options[:10]]}")
+
+            matched = False
+            for opt_text, opt_val in options:
+                # "ALBRK-E" → "ALBRK" prefix eşleşmesi
+                if opt_text.upper().startswith(symbol_upper) or opt_val.upper().startswith(symbol_upper):
+                    try:
+                        sel.select_by_visible_text(opt_text)
+                    except Exception:
+                        sel.select_by_value(opt_val)
+                    log.info(f"✅ Hisse seçildi: {opt_text} (value={opt_val})")
+                    matched = True
+                    break
+
+            if not matched:
+                # Tam eşleşme bulunamadı — contains dene
+                for opt_text, opt_val in options:
+                    if symbol_upper in opt_text.upper():
+                        try:
+                            sel.select_by_visible_text(opt_text)
+                        except Exception:
+                            sel.select_by_value(opt_val)
+                        log.info(f"✅ Hisse seçildi (contains): {opt_text}")
+                        matched = True
+                        break
+
+            if not matched:
+                take_screenshot(self.driver, f"symbol_not_in_dropdown_{symbol}")
+                raise Exception(
+                    f"'{symbol}' dropdown'da bulunamadı! "
+                    f"Mevcut seçenekler: {[o[0] for o in options[:15]]}"
+                )
+
+            # Seçim sonrası fiyat tablosunun yüklenmesini bekle
+            time.sleep(2)
+            take_screenshot(self.driver, f"symbol_selected_{symbol}")
+            return
+
+        # ── Yol 2: Autocomplete text input (fallback) ────────
+        log.info("  <select> bulunamadı, autocomplete input deneniyor...")
         input_el = self._find_clickable(
             selectors=[
                 (By.ID, "SelectedStockCode_input"),
                 (By.CSS_SELECTOR, "input[id*='SelectedStockCode']"),
-                (By.CSS_SELECTOR, "input.autocomplete, input[autocomplete]"),
             ],
             description="Hisse sembol input",
-            timeout=10,
+            timeout=8,
         )
         if not input_el:
             take_screenshot(self.driver, f"symbol_input_not_found_{symbol}")
             raise Exception("Hisse sembol input alanı bulunamadı!")
 
         input_el.clear()
-        input_el.send_keys(symbol.upper())
-        log.info(f"  Sembol yazıldı: {symbol.upper()}")
-        time.sleep(1.5)  # autocomplete listesinin açılmasını bekle
+        input_el.send_keys(symbol_upper)
+        log.info(f"  Sembol yazıldı: {symbol_upper}")
+        time.sleep(1.5)
 
-        # Adım 2: Açılan autocomplete listesinden eşleşeni seç
+        # Autocomplete listesinden seç
         try:
-            # jQuery UI autocomplete → li elementleri
             suggestions = self.driver.find_elements(
                 By.CSS_SELECTOR,
                 "ul.ui-autocomplete li.ui-menu-item, "
@@ -438,46 +505,31 @@ class Trader:
                 ".ui-autocomplete .ui-menu-item-wrapper"
             )
             if suggestions:
-                # Tam eşleşme ara, yoksa ilk öneriyi al
                 selected = None
                 for s in suggestions:
-                    if symbol.upper() in s.text.upper():
+                    if symbol_upper in s.text.upper():
                         selected = s
-                        if s.text.upper().startswith(symbol.upper()):
-                            break  # Tam prefix eşleşmesi — ideal
+                        if s.text.upper().startswith(symbol_upper):
+                            break
                 if selected:
                     try:
                         selected.click()
                     except Exception:
                         self.driver.execute_script("arguments[0].click();", selected)
                     log.info(f"  Öneri seçildi: {selected.text.strip()[:40]}")
-                    time.sleep(0.5)
                 else:
-                    # Liste açıldı ama eşleşme yok → ENTER ile ilk öneriye git
                     input_el.send_keys(Keys.ARROW_DOWN)
                     time.sleep(0.3)
                     input_el.send_keys(Keys.RETURN)
-                    log.info(f"  Öneri listesi açıktı, ENTER ile seçildi.")
-                    time.sleep(0.5)
+                    log.info("  ENTER ile ilk öneri seçildi.")
             else:
-                # Liste gelmedi → doğrudan ENTER dene
                 input_el.send_keys(Keys.RETURN)
-                log.warning(f"  Autocomplete listesi gelmedi, ENTER denendi.")
-                time.sleep(0.5)
+                log.warning("  Autocomplete listesi gelmedi, ENTER denendi.")
         except Exception as e:
-            log.warning(f"  Autocomplete seçim hatası: {e} — devam ediliyor.")
+            log.warning(f"  Autocomplete seçim hatası: {e}")
 
-        # Adım 3: Seçim doğrulama — gizli input'ta değer var mı?
-        try:
-            hidden = self.driver.find_element(By.ID, "SelectedStockCode_textinput")
-            val = hidden.get_attribute("value") or ""
-            if val:
-                log.info(f"✅ Sembol seçildi (hidden value): {val}")
-            else:
-                log.warning(f"⚠️ Gizli input boş — sembol seçimi doğrulanamadı.")
-                take_screenshot(self.driver, f"symbol_hidden_empty_{symbol}")
-        except Exception:
-            log.debug("Gizli sembol input kontrolü atlandı.")
+        time.sleep(2)
+        take_screenshot(self.driver, f"symbol_selected_{symbol}")
 
 
     def _select_side(self, side: OrderSide):
@@ -562,9 +614,12 @@ class Trader:
         """
         İLERİ butonuna basar.
 
-        Keşif (2026-03-19): deepscan çıktısında buton text = "İLERİ"
-        Adım 1 (sembol seçimi) → İLERİ → Adım 2 (lot/fiyat)
-        Adım 2 (lot/fiyat dolu) → İLERİ (veya GÖNDER) → onay
+        Keşif (2026-03-19):
+          - deepscan çıktısında buton text = "İLERİ"
+          - Hisse seçilince fiyat tablosu yükleniyor, sayfa uzuyor
+          - İLERİ butonu ekran dışında kalabiliyor → scroll + JS click
+          Adım 1 (sembol seçimi) → İLERİ → Adım 2 (lot/fiyat)
+          Adım 2 (lot/fiyat dolu) → İLERİ (veya GÖNDER) → onay
         """
         log.info("İLERİ butonuna basılıyor...")
         ileri_btn = self._find_clickable(
@@ -584,6 +639,13 @@ class Trader:
             timeout=8,
         )
         if ileri_btn:
+            # Buton ekran dışında olabilir — scroll into view + JS click
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); "
+                "arguments[0].focus();",
+                ileri_btn,
+            )
+            time.sleep(0.5)
             try:
                 ileri_btn.click()
             except Exception:
