@@ -83,24 +83,38 @@ class Auth:
                 log.info("Bireysel sekmesi zaten aktif veya bulunamadı")
 
             # ── Adım 1: Müşteri No / T.C. Kimlik No ──────────────
+            # NOT: Bu alan <input> değil, <div contenteditable="true" id="CustomerNumberDisplay">
             log.info("Müşteri No giriliyor...")
-            musteri_input = self._find_element(
+            musteri_div = self._find_element(
                 possible_selectors=[
-                    (By.ID, "IntUserName"),
-                    (By.NAME, "IntUserName"),
+                    (By.ID, "CustomerNumberDisplay"),
+                    (By.CSS_SELECTOR, "div#CustomerNumberDisplay"),
                 ],
-                description="Müşteri No",
+                description="Müşteri No (contenteditable div)",
                 timeout=10,
             )
 
-            if musteri_input:
-                # JS focus sonrası ActionChains ile yaz (element not interactable bypass)
-                self.driver.execute_script(
-                    "arguments[0].scrollIntoView({block:'center'}); arguments[0].focus(); arguments[0].click();",
-                    musteri_input
-                )
-                time.sleep(0.3)
-                ActionChains(self.driver).click(musteri_input).send_keys(KUVEYTTURK_TC).perform()
+            if musteri_div:
+                # contenteditable div'e tıkla, içini temizle, yazı yaz
+                self.driver.execute_script("""
+                    var el = arguments[0];
+                    var text = arguments[1];
+                    el.focus();
+                    el.click();
+                    el.textContent = text;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('blur', { bubbles: true }));
+                """, musteri_div, KUVEYTTURK_TC)
+                time.sleep(0.5)
+                # Gizli IntUserName input'unu da güncelle
+                try:
+                    self.driver.execute_script(
+                        "document.getElementById('IntUserName').value = arguments[0];",
+                        KUVEYTTURK_TC
+                    )
+                except Exception:
+                    pass
                 log.info(f"Müşteri No girildi: {KUVEYTTURK_TC[:3]}***")
                 take_screenshot(self.driver, "✅ Müşteri No girildi")
             else:
