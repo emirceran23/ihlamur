@@ -11,9 +11,11 @@ Telegram üzerinden tamamen uzaktan yönetilebilir.
 |---------|-------|--------|
 | KuveytTürk girişi | ✅ Tamamlandı | CAPTCHA + mobil onay dahil |
 | Cookie/session yönetimi | ✅ Tamamlandı | 30 dk'da bir yenilenir |
-| Telegram komut botu | ✅ Tamamlandı | 7 komut |
+| Telegram komut botu | ✅ Tamamlandı | 9 komut |
 | Explore (uzaktan kumanda) | ✅ Tamamlandı | Tıkla/yaz/scroll/JS |
-| Hisse senedi alım/satım | ⬜ Yapılacak | Dashboard keşfi bekleniyor |
+| Ana menü keşfi | ✅ Tamamlandı | "Yatırım" linki doğrulandı |
+| Yatırım alt menü keşfi | ✅ Tamamlandı | Hisse Alış/Satış/Portföy sayfaları görüldü |
+| Hisse senedi alım/satım | ⬜ Yapılacak | Hisse select HTML'i bekleniyor |
 | Strateji motoru | ⬜ Yapılacak | — |
 
 ---
@@ -89,6 +91,8 @@ Long-polling ile komut dinler. `threading.Lock` ile aynı anda tek ağır işlem
 | `/status` | Oturum durumu, cookie yaşı, URL |
 | `/screenshot` | Anlık ekran görüntüsü |
 | `/explore` | İnteraktif uzaktan kumanda modu |
+| `/yatırım` | Yatırım menüsüne git, alt linkleri listele |
+| `/portföy` | PORTFÖYÜM sayfası — bakiye özeti |
 | `/cancel` | Botu durdur (SIGINT → `finally` bloğu) |
 
 **Loop / çakışma korumaları:**
@@ -126,10 +130,43 @@ Her işlemden sonra otomatik screenshot gelir.
 
 ## ⬜ Yapılacaklar
 
-### Öncelik 1 — Dashboard Keşfi
-- `/explore` ile dashboard sayfasını tara
-- Hisse senedi / portföy sayfasına giden linkleri bul
-- Menü yapısını belgele
+### Öncelik 1 — Hisse Alış HTML Doğrulaması
+
+Ekran görüntülerinden elde edilen bilgiler (2026-03-18):
+
+**Yatırım alt menüsü yapısı (Ekran 1):**
+
+| Grup | Alt Sayfa | Menü Linki |
+|------|-----------|------------|
+| Yatırım Hesabı Para Transferleri | — | Yatırım Hesabına / Yatırım Hesabından |
+| Para Transferi | — | Hesaba |
+| Hesap İşlemleri | YATIRIM HESAPLARI | `tıkla "Yatırım Hesapları"` |
+| Hesap İşlemleri | PORTFÖYÜM | `tıkla "Portföyüm"` ← `/portföy` komutu |
+| Fon İşlemleri | — | Fon Alış / Fon Satış / Emir Takip |
+| **Hisse Senedi İşlemleri** | **HİSSE ALIŞ** | `tıkla "Hisse Alış"` |
+| **Hisse Senedi İşlemleri** | **HİSSE SATIŞ** | `tıkla "Hisse Satış"` |
+| **Hisse Senedi İşlemleri** | — | Emirlerim / Hisse Hareketleri |
+| Kira Sertifikası İşlemleri | — | Alış / Satış / İhale |
+
+**PORTFÖYÜM sayfası (Ekran 2):**
+- "Bakiye Bilgileri (TL)" bölümü — 6 satır: Toplam Hisse, Sukuk, Fon, T+2, T+1, Toplam
+- Portföy boş olduğundan hisse tablosu yapısı henüz görülmedi
+
+**YATIRIM HESAPLARI sayfası (Ekran 3):**
+- TL hesabı: `97237910-4000` / Mustafa Emir Ceran
+- USD hesabı: `97237910-4001`
+- Yatırım Menkul Değerler Hesabı: **`418879`** ← Hisse alışta kullanılan hesap
+
+**HİSSE ALIŞ sayfası (Ekran 4):**
+- Hesap seçimi: 418879 zaten seçili
+- Hisse seçimi: `<select>` dropdown — `-- Seçiniz --`
+- Buton: **İLERİ** (2. adımda lot/fiyat formu gelecek)
+- Uyarı: "Hisse senetlerinin alım-satım kararı yatırımcıya aittir."
+
+**Beklenenler HTML'den:**
+- Hisse `<select>` elementinin `id` ve `name` attribute'ları
+- İLERİ butonunun `name`/`value`
+- 2. adım formu: lot input `id/name`, fiyat input `id/name`, gönder butonu
 
 ### Öncelik 2 — Trader (`core/trader.py`)
 - `get_portfolio()` — portföy çekme

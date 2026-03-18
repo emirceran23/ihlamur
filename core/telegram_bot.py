@@ -8,8 +8,25 @@ Telegram üzerinden bot komutlarıyla sistemi kontrol eder:
   /status     — Oturum durumu
   /screenshot — Anlık ekran görüntüsü
   /explore    — İnteraktif sayfa keşfi (uzaktan kumanda modu)
-  /cancel     — Botu durdur (python process'i kapat)
-  /help       — Komut listesi
+  /cancel     — Botu durdur (python proces    def _cmd_help(self):
+        send_telegram_message(
+            "🌳 <b>İhlamur Bot Komutları</b>\n\n"
+            "<b>Oturum:</b>\n"
+            "/login — Giriş yap (cookie → tam giriş)\n"
+            "/relogin — Sıfırdan giriş yap\n"
+            "/logout — Çıkış yap\n\n"
+            "<b>İzleme:</b>\n"
+            "/status — Oturum durumu\n"
+            "/screenshot — Ekran görüntüsü\n\n"
+            "<b>Yatırım:</b>\n"
+            "/yatırım — Yatırım menüsüne git, alt menüleri listele\n"
+            "/portföy — Portföy bakiye özeti\n\n"
+            "<b>Keşif:</b>\n"
+            "/explore — İnteraktif sayfa keşfi\n\n"
+            "<b>Sistem:</b>\n"
+            "/cancel — Botu durdur\n"
+            "/help — Bu mesaj"
+        )       — Komut listesi
 
   Explore modundayken (/ olmadan):
     tıkla #elementId         — ID ile tıkla
@@ -181,6 +198,10 @@ class TelegramBot:
             "/screenshot": self._cmd_screenshot,
             "/ss": self._cmd_screenshot,
             "/explore": self._cmd_explore,
+            "/yatirim": self._cmd_yatirim,
+            "/yatırım": self._cmd_yatirim,
+            "/portfoy": self._cmd_portfoy,
+            "/portföy": self._cmd_portfoy,
             "/cancel": self._cmd_cancel,
             "/help": self._cmd_help,
             "/start": self._cmd_help,
@@ -339,6 +360,72 @@ class TelegramBot:
         # SIGINT göndererek ana thread'deki sleep'i keser → finally bloğu temizliği yapar
         os.kill(os.getpid(), signal.SIGINT)
 
+    # ──────────────────────────────────────────────────────────
+    #  KOMUT HANDLER'LARI — YATIRIM MENÜSÜ
+    # ──────────────────────────────────────────────────────────
+    def _cmd_yatirim(self):
+        """
+        Ana menüdeki 'Yatırım' linkine tıklar, alt menüleri listeler.
+        Keşif sonucu (2026-03-18): tıkla "Yatırım" çalışıyor.
+        """
+        from core.trader import Trader
+
+        send_telegram_message("📈 <b>Yatırım menüsüne gidiliyor...</b>")
+
+        try:
+            trader = Trader(self.driver)
+            items = trader.explore_investment_submenu()
+
+            if not items:
+                send_telegram_message(
+                    "⚠️ Yatırım alt menüsünde hiç link bulunamadı.\n"
+                    "Oturum açık mı? /status ile kontrol edin."
+                )
+                return
+
+            msg = "📈 <b>Yatırım Alt Menüsü</b>\n\n"
+            for item in items:
+                eid = item.get("id", "")
+                text = item.get("text", "")
+                href = item.get("href", "")
+                hint = f"#{eid}" if eid else f'"{text}"'
+                msg += f"  • <code>tıkla {hint}</code> — {text[:45]}\n"
+                if href:
+                    msg += f"    <i>{href[:70]}</i>\n"
+
+            if len(msg) > 4000:
+                msg = msg[:4000] + "\n...(kesildi)"
+
+            send_telegram_message(msg)
+            send_telegram_message(
+                "💡 İpucu: İstediğiniz sayfaya gitmek için <b>/explore</b> "
+                "komutunu açıp <code>tıkla \"Hisse Alış\"</code> gibi "
+                "komutlar kullanabilirsiniz."
+            )
+
+        except Exception as e:
+            log.error(f"/yatırım hatası: {e}")
+            send_telegram_message(f"❌ Yatırım menüsü hatası: {e}")
+
+    def _cmd_portfoy(self):
+        """
+        PORTFÖYÜM sayfasına gider ve bakiye özetini Telegram'a gönderir.
+        Yol: Yatırım → Hesap İşlemleri → Portföyüm
+        Sayfa başlığı: "PORTFÖYÜM"
+        """
+        from core.trader import Trader
+
+        send_telegram_message("📊 <b>Portföy bilgileri çekiliyor...</b>")
+
+        try:
+            trader = Trader(self.driver)
+            text = trader.get_portfolio_summary_text()
+            send_telegram_message(text)
+            take_screenshot(self.driver, "📊 Portföy")
+        except Exception as e:
+            log.error(f"/portföy hatası: {e}")
+            send_telegram_message(f"❌ Portföy hatası: {e}")
+
     def _cmd_help(self):
         send_telegram_message(
             "🌳 <b>İhlamur Bot Komutları</b>\n\n"
@@ -349,6 +436,8 @@ class TelegramBot:
             "<b>İzleme:</b>\n"
             "/status — Oturum durumu\n"
             "/screenshot — Ekran görüntüsü\n\n"
+            "<b>Yatırım:</b>\n"
+            "/yatırım — Yatırım menüsüne git, alt menüleri listele\n\n"
             "<b>Keşif:</b>\n"
             "/explore — İnteraktif sayfa keşfi\n\n"
             "<b>Sistem:</b>\n"
@@ -380,7 +469,9 @@ class TelegramBot:
             "• <code>scroll aşağı</code> / <code>yukarı</code>\n"
             "• <code>bekle 5</code> — N saniye bekle\n"
             "• <code>js alert('test')</code> — JavaScript çalıştır\n"
-            "• <code>scan</code> — Sayfayı tekrar tara\n"
+            "• <code>scan</code> — Sayfayı tara (görünür elementler)\n"
+            "• <code>deepscan</code> — Derin tara (gizli menüler dahil)\n"
+            "• <code>html</code> — #__CONTENT__ iç HTML'ini al\n"
             "• <code>bitti</code> — Explore modundan çık\n"
         )
 
@@ -448,7 +539,17 @@ class TelegramBot:
 
             # ── scan ──────────────────────────────────────────
             if lower in ("scan", "tara", "listele"):
-                self._explore_scan_page()
+                self._explore_scan_page(deep=False)
+                return
+
+            # ── deepscan — rect filtresi olmadan tüm DOM ──────
+            if lower in ("deepscan", "derin", "derintara", "derin tara"):
+                self._explore_scan_page(deep=True)
+                return
+
+            # ── html — #__CONTENT__ iç HTML'ini al ────────────
+            if lower in ("html", "kaynak", "source"):
+                self._explore_get_html()
                 return
 
             # ── Bilinmeyen ────────────────────────────────────
@@ -456,7 +557,8 @@ class TelegramBot:
                 "❓ Anlaşılamadı. Komutlar:\n"
                 "<code>tıkla</code>, <code>yaz</code>, <code>git</code>, "
                 "<code>scroll</code>, <code>bekle</code>, <code>js</code>, "
-                "<code>scan</code>, <code>bitti</code>"
+                "<code>scan</code>, <code>deepscan</code>, <code>html</code>, "
+                "<code>bitti</code>"
             )
 
         except Exception as e:
@@ -607,9 +709,46 @@ class TelegramBot:
         except Exception as e:
             send_telegram_message(f"❌ JS hatası: {e}")
 
+    # ── EXPLORE: HTML kaynağı al ──────────────────────────────
+    def _explore_get_html(self):
+        """
+        #__CONTENT__ div'inin iç HTML'ini çeker ve Telegram'a gönderir.
+        KuveytTürk AJAX ile bu alana içerik yüklüyor; sayfa kaynağında boş.
+        İçerik 4096 karakterden uzunsa parçalara böler.
+        """
+        try:
+            html = self.driver.execute_script(
+                "var c = document.querySelector('#__CONTENT__');"
+                "return c ? c.innerHTML : document.body.innerHTML;"
+            )
+            if not html:
+                send_telegram_message("⚠️ #__CONTENT__ boş veya bulunamadı.")
+                return
+
+            # Telegram mesaj limiti 4096 karakter
+            chunk_size = 3800
+            chunks = [html[i:i+chunk_size] for i in range(0, len(html), chunk_size)]
+            send_telegram_message(
+                f"📄 <b>HTML Kaynağı</b> ({len(html)} karakter, {len(chunks)} parça)\n"
+                f"URL: {self.driver.current_url[:80]}"
+            )
+            for idx, chunk in enumerate(chunks, 1):
+                send_telegram_message(
+                    f"<b>Parça {idx}/{len(chunks)}:</b>\n<pre>{chunk[:3800]}</pre>"
+                )
+
+        except Exception as e:
+            send_telegram_message(f"❌ HTML alınamadı: {e}")
+
     # ── EXPLORE: Sayfa tarama ─────────────────────────────────
-    def _explore_scan_page(self):
-        """Sayfadaki tıklanabilir element ve input alanlarını listeler."""
+    def _explore_scan_page(self, deep: bool = False):
+        """
+        Sayfadaki tıklanabilir element ve input alanlarını listeler.
+
+        deep=True → rect filtresi olmadan TÜM linkleri tarar (menü açıkken kullan).
+        KuveytTürk AJAX menüsü: alt menü linkleri DOM'da var ama
+        rect.height=0 olabiliyor veya 15 link limiti dolmadan liste bitiyor.
+        """
         try:
             take_screenshot(self.driver, "🔍 Explore")
 
@@ -617,85 +756,128 @@ class TelegramBot:
             title = self.driver.title[:60]
 
             elements_json = self.driver.execute_script("""
+                var deepScan = arguments[0];
                 var results = [];
                 var seen = new Set();
 
-                // Linkler
-                var links = document.querySelectorAll('a[href]');
-                for (var i = 0; i < links.length && results.length < 15; i++) {
+                // pageOpenLink dahil TÜM linkleri tara
+                var links = document.querySelectorAll('a');
+                for (var i = 0; i < links.length; i++) {
                     var el = links[i];
-                    var text = (el.textContent || '').trim().substring(0, 40);
+                    var text = (el.textContent || '').trim().substring(0, 50);
                     if (!text || seen.has(text)) continue;
                     seen.add(text);
+
                     var rect = el.getBoundingClientRect();
-                    if (rect.width === 0 && rect.height === 0) continue;
+                    // deep modda rect filtresi yok; normal modda sadece
+                    // tamamen sıfır olanları atla (display:none vs hidden)
+                    var hidden = (rect.width === 0 && rect.height === 0);
+                    var displayNone = (window.getComputedStyle(el).display === 'none');
+                    if (!deepScan && (hidden || displayNone)) continue;
+                    if (deepScan && displayNone) continue;
+
                     results.push({
-                        tag: 'a', id: el.id || '', text: text,
-                        href: (el.href || '').substring(0, 60)
+                        tag: 'a',
+                        id: el.id || '',
+                        cls: (el.className || '').substring(0, 60),
+                        text: text,
+                        href: (el.href || '').substring(0, 80),
+                        visible: !hidden && !displayNone
                     });
                 }
 
-                // Butonlar
+                // Butonlar + submit input'lar
                 var btns = document.querySelectorAll(
                     'button, input[type="submit"], input[type="button"]'
                 );
-                for (var i = 0; i < btns.length && results.length < 25; i++) {
+                for (var i = 0; i < btns.length; i++) {
                     var el = btns[i];
-                    var text = (el.textContent || el.value || '').trim().substring(0, 40);
+                    var text = (el.textContent || el.value || '').trim().substring(0, 50);
                     if (!text || seen.has(text)) continue;
                     seen.add(text);
                     var rect = el.getBoundingClientRect();
-                    if (rect.width === 0 && rect.height === 0) continue;
+                    var displayNone = (window.getComputedStyle(el).display === 'none');
+                    if (deepScan && displayNone) continue;
+                    if (!deepScan && (rect.width === 0 && rect.height === 0)) continue;
                     results.push({
-                        tag: el.tagName.toLowerCase(), id: el.id || '',
-                        text: text, type: el.type || ''
+                        tag: el.tagName.toLowerCase(),
+                        id: el.id || '',
+                        cls: (el.className || '').substring(0, 60),
+                        text: text,
+                        type: el.type || '',
+                        visible: !displayNone
                     });
                 }
 
-                // Input alanları (görünür)
+                // Input / select alanları
                 var inputs = document.querySelectorAll(
                     'input[type="text"], input[type="password"], '
                     + 'input[type="email"], input[type="number"], '
                     + 'input[type="tel"], textarea, select, '
                     + 'div[contenteditable="true"]'
                 );
-                for (var i = 0; i < inputs.length && results.length < 35; i++) {
+                for (var i = 0; i < inputs.length; i++) {
                     var el = inputs[i];
                     var rect = el.getBoundingClientRect();
-                    if (rect.width === 0 && rect.height === 0) continue;
+                    var displayNone = (window.getComputedStyle(el).display === 'none');
+                    if (!deepScan && (rect.width === 0 && rect.height === 0)) continue;
+                    if (deepScan && displayNone) continue;
                     results.push({
-                        tag: el.tagName.toLowerCase(), id: el.id || '',
+                        tag: el.tagName.toLowerCase(),
+                        id: el.id || '',
                         name: el.name || '',
                         type: el.type || (el.contentEditable ? 'contenteditable' : ''),
-                        placeholder: (el.placeholder || '').substring(0, 30)
+                        placeholder: (el.placeholder || '').substring(0, 40),
+                        visible: !displayNone
                     });
                 }
 
                 return results;
-            """)
+            """, deep)
 
-            msg = f"🔍 <b>Sayfa Taraması</b>\n\nURL: {url}\nTitle: {title}\n\n"
+            msg = f"🔍 <b>Sayfa Taraması{'  (derin)' if deep else ''}</b>\n\n"
+            msg += f"URL: {url}\nTitle: {title}\n\n"
 
             if not elements_json:
                 msg += "Tıklanabilir element bulunamadı."
             else:
-                # Tıklanabilir
-                clickables = [
-                    e
-                    for e in elements_json
-                    if e["tag"] in ("a", "button", "input") and e.get("text")
+                # Tıklanabilir linkler
+                links = [e for e in elements_json if e["tag"] == "a" and e.get("text")]
+                if links:
+                    # pageOpenLink (menü linkleri) önce göster
+                    menu_links = [e for e in links if "pageOpenLink" in e.get("cls", "")]
+                    other_links = [e for e in links if "pageOpenLink" not in e.get("cls", "")]
+
+                    if menu_links:
+                        msg += "<b>📂 Menü Linkleri:</b>\n"
+                        for e in menu_links:
+                            eid = e.get("id", "")
+                            vis = "" if e.get("visible") else " 👁‍🗨gizli"
+                            hint = f"#{eid}" if eid else f"\"{e['text']}\""
+                            msg += f"  • <code>tıkla {hint}</code> — {e['text'][:40]}{vis}\n"
+
+                    if other_links:
+                        msg += "\n<b>🖱 Diğer Linkler:</b>\n"
+                        for e in other_links[:15]:
+                            eid = e.get("id", "")
+                            hint = f"#{eid}" if eid else f"\"{e['text']}\""
+                            msg += f"  • <code>tıkla {hint}</code> — {e['text'][:40]}\n"
+
+                # Butonlar
+                btns = [
+                    e for e in elements_json
+                    if e["tag"] in ("button", "input") and e.get("text")
                 ]
-                if clickables:
-                    msg += "<b>🖱 Tıklanabilir:</b>\n"
-                    for e in clickables:
+                if btns:
+                    msg += "\n<b>� Butonlar:</b>\n"
+                    for e in btns:
                         eid = e.get("id", "")
                         hint = f"#{eid}" if eid else f"\"{e['text']}\""
-                        msg += f"  • <code>tıkla {hint}</code> — {e['text'][:35]}\n"
+                        msg += f"  • <code>tıkla {hint}</code> — {e['text'][:40]}\n"
 
-                # Giriş alanları
+                # Form alanları
                 form_inputs = [
-                    e
-                    for e in elements_json
+                    e for e in elements_json
                     if e["tag"] in ("input", "textarea", "select", "div")
                     and (e.get("name") or e.get("id") or e.get("placeholder"))
                 ]
@@ -706,16 +888,18 @@ class TelegramBot:
                         ename = e.get("name", "")
                         label = eid or ename or e.get("placeholder", "?")
                         hint = (
-                            f"#{eid}"
-                            if eid
-                            else f"[name=\"{ename}\"]"
-                            if ename
+                            f"#{eid}" if eid
+                            else f"[name=\"{ename}\"]" if ename
                             else "?"
                         )
                         msg += f"  • <code>yaz {hint} değer</code> — {label}\n"
 
+            if not deep:
+                msg += "\n💡 Alt menü görünmüyorsa: <code>deepscan</code> deneyin"
+
+            # Telegram 4096 karakter limiti
             if len(msg) > 4000:
-                msg = msg[:4000] + "\n...(kesildi)"
+                msg = msg[:4000] + "\n...(kesildi — daha az element için normal scan)"
 
             send_telegram_message(msg)
 

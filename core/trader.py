@@ -1,6 +1,52 @@
 """
-KuveytTürk TradePlus İşlem modülü.
-Hisse alım, satım ve portföy sorgulama işlemleri.
+KuveytTürk Yatırım İşlem modülü.
+
+Keşif tarihi: 2026-03-18
+─────────────────────────────────────────────────
+Menü yolu (ekran görüntüsü 1):
+  Ana Menü → Yatırım → alt grup açılır:
+
+  Yatırım Hesabı Para Transferleri
+    • Yatırım Hesabına
+    • Yatırım Hesabından Para Transferi
+  Para Transferi
+    • Hesaba
+  Hesap İşlemleri
+    • Uygunluk Testi
+    • Yatırım Hesapları      ← YATIRIM HESAPLARI sayfası
+    • Portföyüm              ← PORTFÖYÜM sayfası
+  Fon İşlemleri
+    • Fon Alış
+    • Fon Satış
+    • Emir Takip
+  Hisse Senedi İşlemleri    ← HEDEFİMİZ
+    • Hisse Alış             ← HİSSE ALIŞ sayfası
+    • Hisse Satış
+    • Emirlerim
+    • Hisse Hareketleri
+  Kira Sertifikası İşlemleri
+    • Alış / Satış / ...
+
+─────────────────────────────────────────────────
+HİSSE ALIŞ sayfası (ekran görüntüsü 4):
+  Başlık: "HİSSE ALIŞ"
+  ① Hesap seçimi — zaten seçili: 418879 / Yatırım Menkul Değerler Hesabı
+  ② Hisse Seçiniz — <select> dropdown  →  "-- Seçiniz --"
+  ③ İLERİ butonu  (sonraki adımda lot/fiyat gelecek)
+
+PORTFÖYÜM sayfası (ekran görüntüsü 2):
+  Başlık: "PORTFÖYÜM"
+  Bölüm: "Bakiye Bilgileri (TL)"
+  Satırlar: Toplam Hisse Değeri, Toplam Sukuk Değeri,
+            Toplam Fon Değeri, T+2 Cari Bakiye,
+            T+1 Cari Bakiye, Toplam Portföy Değeri
+
+YATIRIM HESAPLARI sayfası (ekran görüntüsü 3):
+  Başlık: "YATIRIM HESAPLARI"
+  TL hesabı  : 97237910-4000
+  USD hesabı : 97237910-4001
+  Menkul hesabı: 418879  ← hisse alışta kullanılan hesap
+─────────────────────────────────────────────────
 """
 
 import time
@@ -64,6 +110,109 @@ class Trader:
         self.driver = driver
         self.wait = WebDriverWait(driver, 15)
         self.daily_trade_count = 0
+
+    # ──────────────────────────────────────────────────────────
+    # Menü Navigasyonu  (keşif 2026-03-18)
+    # ──────────────────────────────────────────────────────────
+
+    def navigate_to_investment_menu(self) -> bool:
+        """
+        Ana menüden 'Yatırım' linkine tıklar → alt menü açılır.
+        Keşif: LINK_TEXT "Yatırım" çalışıyor (ekran görüntüsü 1).
+        """
+        log.info("Yatırım menüsüne gidiliyor...")
+        try:
+            el = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.LINK_TEXT, "Yatırım"))
+            )
+            try:
+                el.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", el)
+            time.sleep(2)
+            log.info(f"✅ Yatırım menüsüne tıklandı. URL: {self.driver.current_url}")
+            return True
+        except TimeoutException:
+            log.warning("⚠️ 'Yatırım' linki bulunamadı!")
+            take_screenshot(self.driver, "yatirim_menu_not_found")
+            return False
+
+    def _navigate_to_submenu_item(self, link_text: str, page_title_keyword: str) -> bool:
+        """
+        Yatırım alt menüsündeki bir öğeye gider ve sayfanın yüklendiğini doğrular.
+        link_text      : Tıklanacak linkin tam metni (ör. "Hisse Alış")
+        page_title_kw  : Yüklenen sayfada aranacak başlık anahtar kelimesi
+        """
+        if not self.navigate_to_investment_menu():
+            return False
+        link = self._find_clickable(
+            selectors=[
+                (By.LINK_TEXT, link_text),
+                (By.PARTIAL_LINK_TEXT, link_text),
+                (By.XPATH, f"//a[normalize-space()='{link_text}']"),
+            ],
+            description=link_text,
+            timeout=8,
+        )
+        if not link:
+            log.warning(f"⚠️ '{link_text}' linki bulunamadı!")
+            take_screenshot(self.driver, f"nav_not_found_{link_text.replace(' ', '_')}")
+            return False
+        try:
+            link.click()
+        except Exception:
+            self.driver.execute_script("arguments[0].click();", link)
+        time.sleep(3)
+        # Sayfa başlığı kontrolü
+        try:
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, f"//*[contains(text(), '{page_title_keyword}')]")
+                )
+            )
+        except TimeoutException:
+            log.warning(f"⚠️ '{page_title_keyword}' başlığı bulunamadı, devam ediliyor.")
+        log.info(f"✅ '{link_text}' sayfası yüklendi: {self.driver.current_url}")
+        return True
+
+    def explore_investment_submenu(self) -> list[dict]:
+        """
+        Yatırım menüsüne gidip alt menü linklerini listeler.
+        Her öğe: {text, href, id} içerir.
+        """
+        log.info("Yatırım alt menüsü keşfediliyor...")
+        take_screenshot(self.driver, "before_investment_menu")
+
+        if not self.navigate_to_investment_menu():
+            return []
+
+        take_screenshot(self.driver, "investment_menu_open")
+
+        items = self.driver.execute_script("""
+            var results = [];
+            var seen = new Set();
+            var links = document.querySelectorAll('a[href]');
+            for (var i = 0; i < links.length; i++) {
+                var el = links[i];
+                var text = (el.textContent || '').trim();
+                if (!text || seen.has(text)) continue;
+                var rect = el.getBoundingClientRect();
+                if (rect.width === 0 && rect.height === 0) continue;
+                seen.add(text);
+                results.push({
+                    text: text.substring(0, 60),
+                    href: (el.href || '').substring(0, 100),
+                    id: el.id || ''
+                });
+            }
+            return results;
+        """)
+
+        log.info(f"Yatırım alt menüsünde {len(items)} link bulundu:")
+        for item in items:
+            log.info(f"  [{item['id'] or '-'}] {item['text']} → {item['href']}")
+
+        return items or []
 
     # ──────────────────────────────────────────────────────────
     # Emir Gönderme
@@ -149,220 +298,303 @@ class Trader:
         return True
 
     def _navigate_to_trade_page(self):
-        """İşlem sayfasına gider."""
-        log.info("İşlem sayfasına gidiliyor...")
-        # TradePlus'ta işlem sayfası navigasyonu
-        # Selector'lar keşif sonrası güncellenecek
-        trade_menu = self._find_clickable(
-            selectors=[
-                (By.XPATH, "//a[contains(text(), 'Emir')]"),
-                (By.XPATH, "//a[contains(text(), 'İşlem')]"),
-                (By.XPATH, "//*[contains(text(), 'Hisse')]"),
-                (By.CSS_SELECTOR, "[data-menu='trade']"),
-                (By.CSS_SELECTOR, ".trade-menu"),
-            ],
-            description="İşlem menüsü",
-        )
-        if trade_menu:
-            trade_menu.click()
-            time.sleep(2)
+        """
+        Hisse Alış sayfasına gider.
+        Yol (keşif 2026-03-18):
+          Ana Menü → Yatırım → Hisse Senedi İşlemleri → Hisse Alış
+        Sayfa başlığı: "HİSSE ALIŞ"
+        """
+        log.info("Hisse Alış sayfasına gidiliyor...")
+        self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
 
     def _enter_symbol(self, symbol: str):
-        """Hisse sembolünü girer."""
-        log.info(f"Sembol giriliyor: {symbol}")
-        symbol_input = self._find_clickable(
+        """
+        Hisse Seçiniz dropdown'undan sembol seçer.
+
+        HİSSE ALIŞ sayfası (ekran görüntüsü 4):
+          - "Hisse Seçiniz" etiketi altında <select> — "-- Seçiniz --" varsayılan.
+          - Önce dropdown'u tıkla, ardından sembolü arama/seçme işlemi yap.
+          HTML gelince name/id kesinleşecek; şimdilik label+select kombinasyonu.
+        """
+        log.info(f"Sembol seçiliyor: {symbol}")
+
+        # Sayfanın yüklenmesini bekle
+        time.sleep(1)
+
+        symbol_select = self._find_clickable(
             selectors=[
-                (By.CSS_SELECTOR, "input[placeholder*='Sembol']"),
-                (By.CSS_SELECTOR, "input[placeholder*='sembol']"),
-                (By.CSS_SELECTOR, "input[placeholder*='Hisse']"),
-                (By.CSS_SELECTOR, "input[placeholder*='Ara']"),
-                (By.CSS_SELECTOR, ".symbol-search input"),
-                (By.ID, "symbol"),
-                (By.NAME, "symbol"),
+                # "Hisse Seçiniz" label'ının hemen altındaki select
+                (By.XPATH, "//label[contains(text(),'Hisse')]/following-sibling::select"),
+                (By.XPATH, "//label[contains(text(),'Hisse')]/following::select[1]"),
+                # Genel select selector'ları (HTML'den doğrulanacak)
+                (By.CSS_SELECTOR, "select[name*='hisse']"),
+                (By.CSS_SELECTOR, "select[name*='Hisse']"),
+                (By.CSS_SELECTOR, "select[id*='hisse']"),
+                (By.CSS_SELECTOR, "select[id*='Hisse']"),
+                # Sayfadaki tek/ilk görünür select
+                (By.XPATH, "//select[option[contains(text(),'Seçiniz')]]"),
             ],
-            description="Sembol arama kutusu",
+            description="Hisse seçim dropdown'u",
         )
-        if symbol_input:
-            symbol_input.clear()
-            symbol_input.send_keys(symbol)
+
+        if symbol_select:
+            from selenium.webdriver.support.ui import Select as SeleniumSelect
+            sel = SeleniumSelect(symbol_select)
+            try:
+                sel.select_by_value(symbol)
+            except Exception:
+                try:
+                    sel.select_by_visible_text(symbol)
+                except Exception:
+                    # Partial match: THYAO → "THYAO - Türk Hava..." gibi metinler
+                    for opt in sel.options:
+                        if symbol.upper() in opt.text.upper():
+                            opt.click()
+                            break
+                    else:
+                        take_screenshot(self.driver, f"symbol_not_in_list_{symbol}")
+                        raise Exception(f"'{symbol}' dropdown listesinde bulunamadı!")
             time.sleep(1)
-            # Otomatik tamamlama listesinden seç
-            symbol_input.send_keys(Keys.ENTER)
-            time.sleep(1)
+            log.info(f"✅ Sembol seçildi: {symbol}")
         else:
-            take_screenshot(self.driver, f"symbol_not_found_{symbol}")
-            raise Exception(f"Sembol giriş alanı bulunamadı: {symbol}")
+            take_screenshot(self.driver, f"symbol_select_not_found_{symbol}")
+            raise Exception("Hisse seçim dropdown'u bulunamadı!")
 
     def _select_side(self, side: OrderSide):
-        """Alış veya satış seçer."""
+        """
+        Alış/Satış ayrımı HİSSE ALIŞ ve HİSSE SATIŞ olarak ayrı sayfalarda.
+        Bu metod yalnızca _navigate_to_trade_page'in hangi sayfayı açtığını
+        doğrular — yanlış sayfadaysa yönlendirir.
+        """
         if side == OrderSide.BUY:
-            log.info("ALIŞ seçiliyor...")
-            btn = self._find_clickable(
-                selectors=[
-                    (By.XPATH, "//button[contains(text(), 'Alış')]"),
-                    (By.XPATH, "//button[contains(text(), 'ALIŞ')]"),
-                    (By.XPATH, "//*[contains(text(), 'AL')]"),
-                    (By.CSS_SELECTOR, ".buy-button"),
-                    (By.CSS_SELECTOR, "[data-side='buy']"),
-                ],
-                description="Alış butonu",
-            )
+            # Zaten Hisse Alış sayfasındayız, kontrol et
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//*[contains(text(),'HİSSE ALIŞ')]")
+                    )
+                )
+                log.info("✅ HİSSE ALIŞ sayfası doğrulandı.")
+            except TimeoutException:
+                log.warning("⚠️ HİSSE ALIŞ başlığı bulunamadı, yeniden navigate ediliyor...")
+                self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
         else:
-            log.info("SATIŞ seçiliyor...")
-            btn = self._find_clickable(
-                selectors=[
-                    (By.XPATH, "//button[contains(text(), 'Satış')]"),
-                    (By.XPATH, "//button[contains(text(), 'SATIŞ')]"),
-                    (By.XPATH, "//*[contains(text(), 'SAT')]"),
-                    (By.CSS_SELECTOR, ".sell-button"),
-                    (By.CSS_SELECTOR, "[data-side='sell']"),
-                ],
-                description="Satış butonu",
-            )
-
-        if btn:
-            btn.click()
-            time.sleep(0.5)
-        else:
-            raise Exception(f"{'Alış' if side == OrderSide.BUY else 'Satış'} butonu bulunamadı!")
+            log.info("SATIŞ sayfasına yönlendiriliyor...")
+            self._navigate_to_submenu_item("Hisse Satış", "HİSSE SATIŞ")
 
     def _enter_quantity(self, quantity: int):
-        """Adet girer."""
+        """
+        Lot/adet girer.
+        HİSSE ALIŞ akışı: sembol seçildikten sonra İLERİ'ye basılır,
+        2. adımda lot/fiyat alanları gelir (HTML'den doğrulanacak).
+        """
         log.info(f"Miktar giriliyor: {quantity}")
         qty_input = self._find_clickable(
             selectors=[
-                (By.CSS_SELECTOR, "input[placeholder*='Miktar']"),
-                (By.CSS_SELECTOR, "input[placeholder*='Adet']"),
-                (By.CSS_SELECTOR, "input[placeholder*='miktar']"),
-                (By.CSS_SELECTOR, "input[placeholder*='adet']"),
-                (By.ID, "quantity"),
-                (By.NAME, "quantity"),
-                (By.NAME, "lot"),
+                (By.CSS_SELECTOR, "input[name*='lot']"),
+                (By.CSS_SELECTOR, "input[name*='Lot']"),
+                (By.CSS_SELECTOR, "input[name*='miktar']"),
+                (By.CSS_SELECTOR, "input[name*='adet']"),
+                (By.CSS_SELECTOR, "input[id*='lot']"),
+                (By.CSS_SELECTOR, "input[id*='miktar']"),
+                (By.XPATH, "//label[contains(text(),'Lot')]/following::input[1]"),
+                (By.XPATH, "//label[contains(text(),'Miktar')]/following::input[1]"),
+                (By.XPATH, "//label[contains(text(),'Adet')]/following::input[1]"),
             ],
-            description="Miktar alanı",
+            description="Lot/miktar alanı",
         )
         if qty_input:
             qty_input.clear()
             qty_input.send_keys(str(quantity))
+            log.info(f"✅ Miktar girildi: {quantity}")
         else:
-            raise Exception("Miktar giriş alanı bulunamadı!")
+            take_screenshot(self.driver, "qty_not_found")
+            raise Exception("Lot/miktar giriş alanı bulunamadı!")
 
     def _enter_price(self, price: float):
-        """Fiyat girer."""
+        """
+        Fiyat girer. KuveytTürk sitenin virgüllü format beklediği bilinmektedir.
+        Ör: 320.50 → "320,50" olarak girer.
+        """
         log.info(f"Fiyat giriliyor: {price}")
         price_input = self._find_clickable(
             selectors=[
-                (By.CSS_SELECTOR, "input[placeholder*='Fiyat']"),
-                (By.CSS_SELECTOR, "input[placeholder*='fiyat']"),
-                (By.ID, "price"),
-                (By.NAME, "price"),
-                (By.NAME, "fiyat"),
+                (By.CSS_SELECTOR, "input[name*='fiyat']"),
+                (By.CSS_SELECTOR, "input[name*='Fiyat']"),
+                (By.CSS_SELECTOR, "input[name*='price']"),
+                (By.CSS_SELECTOR, "input[id*='fiyat']"),
+                (By.CSS_SELECTOR, "input[id*='Fiyat']"),
+                (By.XPATH, "//label[contains(text(),'Fiyat')]/following::input[1]"),
+                (By.XPATH, "//label[contains(text(),'Son Fiyat')]/following::input[1]"),
             ],
             description="Fiyat alanı",
         )
         if price_input:
             price_input.clear()
-            # TradePlus virgüllü fiyat bekleyebilir
-            price_str = str(price).replace(".", ",")
+            price_str = f"{price:.2f}".replace(".", ",")  # 320.50 → "320,50"
             price_input.send_keys(price_str)
+            log.info(f"✅ Fiyat girildi: {price_str}")
         else:
+            take_screenshot(self.driver, "price_not_found")
             raise Exception("Fiyat giriş alanı bulunamadı!")
 
     def _submit_order(self):
-        """Emri gönderir."""
-        log.info("Emir gönderiliyor...")
+        """
+        İLERİ → ardından gelen onay/gönder butonuna basar.
+        HİSSE ALIŞ akışı 2 adımlı:
+          Adım 1: Hisse seç → İLERİ
+          Adım 2: Lot/fiyat gir → GÖNDER (HTML gelince isim kesinleşecek)
+        """
+        log.info("İLERİ/GÖNDER butonuna basılıyor...")
         submit_btn = self._find_clickable(
             selectors=[
-                (By.XPATH, "//button[contains(text(), 'Gönder')]"),
-                (By.XPATH, "//button[contains(text(), 'GÖNDER')]"),
-                (By.XPATH, "//button[contains(text(), 'Emri Gönder')]"),
+                # Adım 2 — Gönder
+                (By.XPATH, "//input[@type='submit' and contains(@value,'GÖNDER')]"),
+                (By.XPATH, "//input[@type='submit' and contains(@value,'Gönder')]"),
+                (By.XPATH, "//button[contains(text(),'GÖNDER')]"),
+                (By.XPATH, "//button[contains(text(),'Gönder')]"),
+                # Adım 1 — İLERİ (sembol seçim ekranında)
+                (By.XPATH, "//input[@type='submit' and contains(@value,'İLERİ')]"),
+                (By.XPATH, "//input[@type='submit' and contains(@value,'İleri')]"),
+                (By.XPATH, "//button[normalize-space()='İLERİ']"),
+                (By.XPATH, "//button[normalize-space()='İleri']"),
+                (By.CSS_SELECTOR, "input[type='submit']"),
                 (By.CSS_SELECTOR, "button[type='submit']"),
-                (By.CSS_SELECTOR, ".submit-order"),
-                (By.CSS_SELECTOR, ".order-submit"),
             ],
-            description="Emir gönder butonu",
+            description="İLERİ / GÖNDER butonu",
         )
         if submit_btn:
-            submit_btn.click()
+            try:
+                submit_btn.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", submit_btn)
             time.sleep(2)
+            log.info("✅ Form gönderildi.")
         else:
             take_screenshot(self.driver, "submit_not_found")
-            raise Exception("Emir gönder butonu bulunamadı!")
+            raise Exception("İLERİ/GÖNDER butonu bulunamadı!")
 
     def _confirm_order(self) -> bool:
-        """Emir onay diyaloğunu onaylar."""
+        """
+        Emir onay ekranı — KuveytTürk genellikle modal veya yeni sayfa açar.
+        "Hisse almak istiyorum." mesajı onay niyeti olarak altta görünüyor
+        (ekran görüntüsü 4). Asıl onay butonu HTML'den doğrulanacak.
+        """
         log.info("Emir onaylanıyor...")
-        time.sleep(1)
+        time.sleep(1.5)
 
-        # Onay diyaloğu varsa
         confirm_btn = self._find_clickable(
             selectors=[
-                (By.XPATH, "//button[contains(text(), 'Onayla')]"),
-                (By.XPATH, "//button[contains(text(), 'ONAYLA')]"),
-                (By.XPATH, "//button[contains(text(), 'Evet')]"),
-                (By.XPATH, "//button[contains(text(), 'Tamam')]"),
+                (By.XPATH, "//input[@type='submit' and contains(@value,'ONAYLA')]"),
+                (By.XPATH, "//input[@type='submit' and contains(@value,'Onayla')]"),
+                (By.XPATH, "//button[contains(text(),'ONAYLA')]"),
+                (By.XPATH, "//button[contains(text(),'Onayla')]"),
+                (By.XPATH, "//button[contains(text(),'Evet')]"),
+                (By.XPATH, "//button[contains(text(),'Tamam')]"),
+                (By.CSS_SELECTOR, ".onay-btn"),
                 (By.CSS_SELECTOR, ".confirm-button"),
                 (By.CSS_SELECTOR, ".modal .btn-primary"),
             ],
             description="Onay butonu",
+            timeout=5,
         )
         if confirm_btn:
-            confirm_btn.click()
+            try:
+                confirm_btn.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", confirm_btn)
             time.sleep(2)
+            log.info("✅ Emir onaylandı.")
 
-        # Başarı mesajı kontrolü
         take_screenshot(self.driver, "order_result")
-        return True  # Detaylı kontrol keşif sonrası eklenecek
+        return True  # Hata kontrolü HTML'den doğrulanınca eklenecek
 
     # ──────────────────────────────────────────────────────────
     # Portföy
     # ──────────────────────────────────────────────────────────
 
     def get_portfolio(self) -> list[PortfolioItem]:
-        """Portföy bilgilerini çeker."""
+        """
+        Portföy bilgilerini çeker.
+
+        PORTFÖYÜM sayfası (ekran görüntüsü 2):
+          Yatırım → Hesap İşlemleri → Portföyüm
+          Başlık: "PORTFÖYÜM"
+
+          "Bakiye Bilgileri (TL)" bölümü — sıralı satırlar:
+            Toplam Hisse Değeri    | 0,00 TL
+            Toplam Sukuk Değeri    | 0,00 TL
+            Toplam Fon Değeri      | 0,00 TL
+            T+2 Cari Bakiye (*)    | 0,00 TL
+            T+1 Cari Bakiye(*)     | 0,00 TL
+            Toplam Portföy Değeri  | 0,00 TL
+
+          Hisse pozisyonları varsa ayrı bir tabloda listelenecek
+          (şu an portföy boş — tablo yapısı HTML'den doğrulanacak).
+        """
         log.info("Portföy bilgileri çekiliyor...")
         portfolio = []
 
         try:
-            # Portföy sayfasına git
-            portfolio_menu = self._find_clickable(
-                selectors=[
-                    (By.XPATH, "//a[contains(text(), 'Portföy')]"),
-                    (By.XPATH, "//*[contains(text(), 'Portföy')]"),
-                    (By.CSS_SELECTOR, "[data-menu='portfolio']"),
-                    (By.CSS_SELECTOR, ".portfolio-menu"),
-                ],
-                description="Portföy menüsü",
-            )
-            if portfolio_menu:
-                portfolio_menu.click()
-                time.sleep(3)
+            # ── Portföyüm sayfasına git ───────────────────────
+            ok = self._navigate_to_submenu_item("Portföyüm", "PORTFÖYÜM")
+            if not ok:
+                log.error("Portföyüm sayfasına gidilemedi!")
+                return []
 
             take_screenshot(self.driver, "portfolio")
 
-            # Portföy tablosunu parse et
-            # Selector'lar keşif sonrası güncellenecek
+            # ── Bakiye özeti ──────────────────────────────────
+            summary = self._parse_portfolio_summary()
+            for k, v in summary.items():
+                log.info(f"  {k}: {v}")
+
+            # ── Hisse pozisyonları tablosu ────────────────────
+            # Ekran görüntüsünde portföy boş; tablo varsa parse et.
+            # Tablo başlıkları HTML'den doğrulanınca güncellenecek.
             rows = self.driver.find_elements(
-                By.CSS_SELECTOR, "table tbody tr, .portfolio-row"
+                By.CSS_SELECTOR,
+                # KuveytTürk jQuery/HTML sitesi — olası selector'lar:
+                "table.portfoyTablosu tbody tr, "
+                "table#portfoyTablosu tbody tr, "
+                "table tbody tr.portfoy-satir, "
+                "table tbody tr"
             )
 
             for row in rows:
                 cells = row.find_elements(By.TAG_NAME, "td")
                 if len(cells) >= 4:
                     try:
+                        symbol_text = cells[0].text.strip()
+                        # Boş veya başlık satırlarını atla
+                        if not symbol_text or symbol_text in (
+                            "Hisse", "Sembol", "Kod", "Toplam"
+                        ):
+                            continue
                         item = PortfolioItem(
-                            symbol=cells[0].text.strip(),
-                            quantity=int(cells[1].text.strip().replace(".", "")),
+                            symbol=symbol_text,
+                            quantity=int(
+                                cells[1].text.strip()
+                                .replace(".", "")
+                                .replace(",", "")
+                                or "0"
+                            ),
                             avg_cost=self._parse_price(cells[2].text),
                             current_price=self._parse_price(cells[3].text),
-                            profit_loss=self._parse_price(cells[4].text) if len(cells) > 4 else 0.0,
-                            profit_loss_pct=self._parse_price(cells[5].text) if len(cells) > 5 else 0.0,
+                            profit_loss=(
+                                self._parse_price(cells[4].text)
+                                if len(cells) > 4 else 0.0
+                            ),
+                            profit_loss_pct=(
+                                self._parse_price(cells[5].text)
+                                if len(cells) > 5 else 0.0
+                            ),
                         )
                         portfolio.append(item)
                     except (ValueError, IndexError) as e:
                         log.debug(f"Satır parse edilemedi: {e}")
 
-            log.info(f"Portföyde {len(portfolio)} hisse bulundu.")
+            log.info(f"Portföyde {len(portfolio)} hisse pozisyonu bulundu.")
             for item in portfolio:
                 log.info(
                     f"  {item.symbol}: {item.quantity} adet | "
@@ -377,213 +609,199 @@ class Trader:
 
         return portfolio
 
-    # ──────────────────────────────────────────────────────────
-    # Keşif (İlk kurulum için)
-    # ──────────────────────────────────────────────────────────
-
-    def explore_stock_page(self) -> dict:
+    def _parse_portfolio_summary(self) -> dict:
         """
-        Hisse Senedi tabına tıklayıp sayfadaki tüm elementleri keşfeder.
-        Bu bilgilerle emir gönderme selector'larını belirleyeceğiz.
+        PORTFÖYÜM sayfasındaki 'Bakiye Bilgileri (TL)' tablosunu parse eder.
+        Dönüş: {
+          'toplam_hisse': float,
+          'toplam_sukuk': float,
+          'toplam_fon': float,
+          't2_bakiye': float,
+          't1_bakiye': float,
+          'toplam_portfoy': float,
+        }
         """
-        log.info("=" * 60)
-        log.info("🔍 Hisse Senedi sayfası keşfi başlıyor...")
-        log.info("=" * 60)
+        result = {
+            "toplam_hisse": 0.0,
+            "toplam_sukuk": 0.0,
+            "toplam_fon": 0.0,
+            "t2_bakiye": 0.0,
+            "t1_bakiye": 0.0,
+            "toplam_portfoy": 0.0,
+        }
+        try:
+            # Etiket-değer çiftlerini JS ile çek (siteye özgü tablo yapısı)
+            data = self.driver.execute_script("""
+                var rows = document.querySelectorAll(
+                    'table tr, .bakiyeBilgileri tr, .portfoy-ozet tr'
+                );
+                var result = {};
+                for (var i = 0; i < rows.length; i++) {
+                    var cells = rows[i].querySelectorAll('td');
+                    if (cells.length >= 2) {
+                        var label = (cells[0].textContent || '').trim();
+                        var value = (cells[1].textContent || '').trim();
+                        if (label) result[label] = value;
+                    }
+                }
+                return result;
+            """)
+            mapping = {
+                "Toplam Hisse Değeri": "toplam_hisse",
+                "Toplam Sukuk Değeri": "toplam_sukuk",
+                "Toplam Fon Değeri": "toplam_fon",
+                "T+2 Cari Bakiye": "t2_bakiye",
+                "T+1 Cari Bakiye": "t1_bakiye",
+                "Toplam Portföy Değeri": "toplam_portfoy",
+            }
+            for label, key in mapping.items():
+                for raw_label, raw_val in (data or {}).items():
+                    if label.lower() in raw_label.lower():
+                        result[key] = self._parse_price(raw_val)
+                        break
+        except Exception as e:
+            log.warning(f"Bakiye özeti parse hatası: {e}")
+        return result
 
-        take_screenshot(self.driver, "before_stock_tab")
+    def get_portfolio_summary_text(self) -> str:
+        """
+        Telegram mesajı için portföy özetini düz metin olarak döndürür.
+        """
+        summary = {}
+        try:
+            self._navigate_to_submenu_item("Portföyüm", "PORTFÖYÜM")
+            summary = self._parse_portfolio_summary()
+            items = self.get_portfolio()
+        except Exception as e:
+            return f"❌ Portföy çekilemedi: {e}"
 
-        # ── Adım 1: "Hisse Senedi" tabına tıkla ─────────────
-        stock_tab = self._find_clickable(
-            selectors=[
-                (By.XPATH, "//button[contains(text(), 'Hisse Senedi')]"),
-                (By.XPATH, "//span[contains(text(), 'Hisse Senedi')]/.."),
-                (By.XPATH, "//*[contains(@class, 'MuiTab')][contains(text(), 'Hisse')]"),
-                (By.CSS_SELECTOR, ".MuiTab-root:nth-child(2)"),
-            ],
-            description="Hisse Senedi tabı",
-        )
-        if stock_tab:
-            stock_tab.click()
-            log.info("✅ Hisse Senedi tabına tıklandı!")
-            time.sleep(5)  # Sayfanın yüklenmesini bekle
+        lines = [
+            "📊 <b>PORTFÖYÜM</b>",
+            "",
+            f"Toplam Hisse    : <b>{format_price(summary.get('toplam_hisse', 0))}</b>",
+            f"Toplam Sukuk    : {format_price(summary.get('toplam_sukuk', 0))}",
+            f"Toplam Fon      : {format_price(summary.get('toplam_fon', 0))}",
+            f"T+2 Bakiye      : {format_price(summary.get('t2_bakiye', 0))}",
+            f"T+1 Bakiye      : {format_price(summary.get('t1_bakiye', 0))}",
+            f"Toplam Portföy  : <b>{format_price(summary.get('toplam_portfoy', 0))}</b>",
+        ]
+
+        if items:
+            lines += ["", "📈 <b>Pozisyonlar:</b>"]
+            for it in items:
+                pl_sign = "+" if it.profit_loss >= 0 else ""
+                lines.append(
+                    f"  {it.symbol}: {format_quantity(it.quantity)} lot | "
+                    f"Maliyet {format_price(it.avg_cost)} | "
+                    f"Güncel {format_price(it.current_price)} | "
+                    f"K/Z {pl_sign}{format_price(it.profit_loss)} ({pl_sign}{it.profit_loss_pct:.2f}%)"
+                )
         else:
-            log.warning("⚠️ Hisse Senedi tabı bulunamadı!")
+            lines.append("\nPortföyde hisse pozisyonu bulunmuyor.")
 
-        take_screenshot(self.driver, "stock_tab_clicked")
+        return "\n".join(lines)
 
-        # ── Adım 2: Sayfadaki tüm elementleri keşfet ─────────
+    # ──────────────────────────────────────────────────────────
+    # Keşif yardımcıları (HTML doğrulama için)
+    # ──────────────────────────────────────────────────────────
+
+    def explore_hisse_alis_page(self) -> dict:
+        """
+        Hisse Alış sayfasına gidip tüm form elemanlarını loglar.
+        HTML atıldıktan sonra selector'ları kesinleştirmek için kullanılır.
+        """
+        log.info("=" * 60)
+        log.info("🔍 HİSSE ALIŞ sayfası keşfi başlıyor...")
+        log.info("=" * 60)
+
+        self._navigate_to_submenu_item("Hisse Alış", "HİSSE ALIŞ")
+        take_screenshot(self.driver, "hisse_alis_explore")
+
         page_info = {
             "url": self.driver.current_url,
             "title": self.driver.title,
-            "inputs": [],
-            "buttons": [],
-            "selects": [],
-            "tables": [],
-            "divs_with_text": [],
-            "links": [],
+            "inputs": [], "selects": [], "buttons": [], "tables": [],
         }
 
         # Input'lar
-        inputs = self.driver.find_elements(By.TAG_NAME, "input")
-        for i, inp in enumerate(inputs):
+        for i, el in enumerate(self.driver.find_elements(By.TAG_NAME, "input")):
             try:
                 info = {
-                    "index": i,
-                    "type": inp.get_attribute("type"),
-                    "id": inp.get_attribute("id"),
-                    "name": inp.get_attribute("name"),
-                    "placeholder": inp.get_attribute("placeholder"),
-                    "class": inp.get_attribute("class"),
-                    "value": inp.get_attribute("value"),
-                    "visible": inp.is_displayed(),
-                    "aria-label": inp.get_attribute("aria-label"),
+                    "i": i, "type": el.get_attribute("type"),
+                    "id": el.get_attribute("id"), "name": el.get_attribute("name"),
+                    "value": el.get_attribute("value"),
+                    "placeholder": el.get_attribute("placeholder"),
+                    "class": (el.get_attribute("class") or "")[:60],
+                    "visible": el.is_displayed(),
                 }
                 page_info["inputs"].append(info)
                 if info["visible"]:
-                    log.info(f"  Input[{i}]: type={info['type']} | placeholder={info['placeholder']} | id={info['id']} | class={info['class'][:60] if info['class'] else ''}")
+                    log.info(f"  INPUT[{i}]: {info}")
             except Exception:
                 pass
 
-        # Butonlar
-        buttons = self.driver.find_elements(By.TAG_NAME, "button")
-        for i, btn in enumerate(buttons):
+        # Select'ler
+        for i, el in enumerate(self.driver.find_elements(By.TAG_NAME, "select")):
+            try:
+                from selenium.webdriver.support.ui import Select as SeleniumSelect
+                sel = SeleniumSelect(el)
+                opts = [o.text.strip() for o in sel.options[:10]]
+                info = {
+                    "i": i, "id": el.get_attribute("id"),
+                    "name": el.get_attribute("name"),
+                    "class": (el.get_attribute("class") or "")[:60],
+                    "visible": el.is_displayed(),
+                    "options_preview": opts,
+                }
+                page_info["selects"].append(info)
+                if info["visible"]:
+                    log.info(f"  SELECT[{i}]: {info}")
+            except Exception:
+                pass
+
+        # Butonlar / submit input'lar
+        for i, el in enumerate(
+            self.driver.find_elements(
+                By.CSS_SELECTOR, "button, input[type='submit'], input[type='button']"
+            )
+        ):
             try:
                 info = {
-                    "index": i,
-                    "text": btn.text[:80] if btn.text else "",
-                    "id": btn.get_attribute("id"),
-                    "class": btn.get_attribute("class"),
-                    "type": btn.get_attribute("type"),
-                    "visible": btn.is_displayed(),
-                    "aria-label": btn.get_attribute("aria-label"),
+                    "i": i, "tag": el.tag_name,
+                    "type": el.get_attribute("type"),
+                    "id": el.get_attribute("id"),
+                    "name": el.get_attribute("name"),
+                    "value": el.get_attribute("value"),
+                    "text": (el.text or "")[:50],
+                    "visible": el.is_displayed(),
                 }
                 page_info["buttons"].append(info)
-                if info["visible"] and info["text"]:
-                    log.info(f"  Buton[{i}]: {info['text']} | class={info['class'][:80] if info['class'] else ''}")
-            except Exception:
-                pass
-
-        # MuiTab'lar (React tabları)
-        tabs = self.driver.find_elements(By.CSS_SELECTOR, "[role='tab']")
-        for i, tab in enumerate(tabs):
-            try:
-                log.info(f"  Tab[{i}]: {tab.text} | selected={tab.get_attribute('aria-selected')} | class={tab.get_attribute('class')[:80]}")
+                if info["visible"]:
+                    log.info(f"  BTN[{i}]: {info}")
             except Exception:
                 pass
 
         # Tablolar
-        tables = self.driver.find_elements(By.TAG_NAME, "table")
-        for i, table in enumerate(tables):
+        for i, tbl in enumerate(self.driver.find_elements(By.TAG_NAME, "table")):
             try:
-                headers = [th.text for th in table.find_elements(By.TAG_NAME, "th")]
-                rows_count = len(table.find_elements(By.TAG_NAME, "tr"))
-                log.info(f"  Tablo[{i}]: {rows_count} satır | Başlıklar: {headers}")
-                page_info["tables"].append({"headers": headers, "rows": rows_count})
-            except Exception:
-                pass
-
-        # Önemli div'ler - Alış/Satış/Emir ile ilgili olanlar
-        keywords = ["Alış", "Satış", "Emir", "Lot", "Fiyat", "Miktar", "Sembol", "Hisse", "İşlem"]
-        for keyword in keywords:
-            try:
-                elements = self.driver.find_elements(
-                    By.XPATH, f"//*[contains(text(), '{keyword}')]"
-                )
-                for el in elements[:3]:  # her keyword için max 3
-                    if el.is_displayed():
-                        log.info(f"  BULUNDU: {keyword} -> tag={el.tag_name} text={el.text[:80]} class={el.get_attribute('class')[:60] if el.get_attribute('class') else ''}")
-                        page_info["divs_with_text"].append({
-                            "keyword": keyword,
-                            "tag": el.tag_name,
-                            "text": el.text[:80],
-                            "class": el.get_attribute("class"),
-                        })
-            except Exception:
-                pass
-
-        # Select (dropdown) elemanları
-        selects = self.driver.find_elements(By.TAG_NAME, "select")
-        for i, sel in enumerate(selects):
-            try:
-                log.info(f"  Select[{i}]: id={sel.get_attribute('id')} name={sel.get_attribute('name')}")
-                page_info["selects"].append({
-                    "id": sel.get_attribute("id"),
-                    "name": sel.get_attribute("name"),
-                })
-            except Exception:
-                pass
-
-        # MUI Select'ler (dropdown gibi çalışan div'ler)
-        mui_selects = self.driver.find_elements(By.CSS_SELECTOR, "[role='button'][aria-haspopup]")
-        for i, ms in enumerate(mui_selects):
-            try:
-                if ms.is_displayed():
-                    log.info(f"  MUI-Select[{i}]: text={ms.text[:50]} class={ms.get_attribute('class')[:60]}")
-            except Exception:
-                pass
-
-        # Link'ler
-        links = self.driver.find_elements(By.TAG_NAME, "a")
-        for i, link in enumerate(links):
-            try:
-                if link.is_displayed() and link.text:
-                    href = link.get_attribute("href") or ""
-                    log.info(f"  Link[{i}]: {link.text[:50]} -> {href[:80]}")
-                    page_info["links"].append({"text": link.text[:50], "href": href[:80]})
+                headers = [th.text for th in tbl.find_elements(By.TAG_NAME, "th")]
+                row_count = len(tbl.find_elements(By.TAG_NAME, "tr"))
+                info = {"i": i, "headers": headers, "rows": row_count,
+                        "id": tbl.get_attribute("id"),
+                        "class": (tbl.get_attribute("class") or "")[:60]}
+                page_info["tables"].append(info)
+                log.info(f"  TABLE[{i}]: {info}")
             except Exception:
                 pass
 
         log.info("=" * 60)
-        log.info(f"📊 Özet: {len(page_info['inputs'])} input, {len(page_info['buttons'])} buton, {len(page_info['tables'])} tablo")
+        log.info(
+            f"📊 Özet: {len(page_info['inputs'])} input, "
+            f"{len(page_info['selects'])} select, "
+            f"{len(page_info['buttons'])} buton, "
+            f"{len(page_info['tables'])} tablo"
+        )
         log.info("=" * 60)
-
-        take_screenshot(self.driver, "stock_page_explored")
-        return page_info
-
-    def explore_trade_page(self) -> dict:
-        """
-        İşlem sayfasının yapısını keşfeder.
-        İlk çalıştırmada kullanılır, selector'ları belirlemek için.
-        """
-        log.info("İşlem sayfası keşfediliyor...")
-        take_screenshot(self.driver, "trade_page_explore")
-
-        page_info = {
-            "url": self.driver.current_url,
-            "title": self.driver.title,
-            "inputs": [],
-            "buttons": [],
-            "selects": [],
-            "tables": [],
-        }
-
-        for tag, key in [("input", "inputs"), ("button", "buttons"), ("select", "selects")]:
-            elements = self.driver.find_elements(By.TAG_NAME, tag)
-            for el in elements:
-                page_info[key].append({
-                    "tag": tag,
-                    "text": el.text[:50] if el.text else "",
-                    "id": el.get_attribute("id"),
-                    "name": el.get_attribute("name"),
-                    "class": el.get_attribute("class"),
-                    "type": el.get_attribute("type"),
-                    "placeholder": el.get_attribute("placeholder"),
-                    "visible": el.is_displayed(),
-                })
-
-        tables = self.driver.find_elements(By.TAG_NAME, "table")
-        for table in tables:
-            headers = [th.text for th in table.find_elements(By.TAG_NAME, "th")]
-            page_info["tables"].append({"headers": headers})
-
-        # Detaylı log
-        for key in ["inputs", "buttons", "selects"]:
-            log.info(f"\n{'='*50}")
-            log.info(f"{key.upper()} ({len(page_info[key])} adet):")
-            for i, item in enumerate(page_info[key]):
-                if item.get("visible"):
-                    log.info(f"  [{i}] {item}")
-
         return page_info
 
     # ──────────────────────────────────────────────────────────
