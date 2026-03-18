@@ -32,6 +32,9 @@ screenshots/
 logs/
 *.log
 
+# Session (cookies — hassas veri!)
+session/
+
 # OS
 .DS_Store
 Thumbs.db

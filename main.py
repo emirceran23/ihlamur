@@ -6,8 +6,10 @@ Ana giriş noktası.
 
 import argparse
 import sys
+import time
 from core.browser import Browser
 from core.auth import Auth
+from core.session import SessionManager
 from core.trader import Trader, Order, OrderSide, OrderType
 from utils.logger import get_logger
 from utils.helpers import send_telegram_message
@@ -21,9 +23,9 @@ def parse_args():
     )
     parser.add_argument(
         "--action",
-        choices=["buy", "sell", "portfolio", "explore", "login-test"],
+        choices=["buy", "sell", "portfolio", "explore", "login-test", "serve"],
         default="login-test",
-        help="Yapılacak işlem (varsayılan: login-test)",
+        help="Yapılacak işlem (varsayılan: login-test, serve: sürekli çalışma)",
     )
     parser.add_argument("--symbol", type=str, help="Hisse sembolü (ör: THYAO)")
     parser.add_argument("--quantity", type=int, help="Adet")
@@ -37,6 +39,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def login_with_session(auth: Auth, session: SessionManager) -> bool:
+    """
+    Önce cookie ile oturum geri yükleme dener.
+    Başarısız olursa tam login akışı çalışır.
+    """
+    # 1) Cookie'lerle oturumu geri yüklemeyi dene
+    log.info("🔄 Kayıtlı oturum kontrol ediliyor...")
+    if session.try_restore_session():
+        auth.is_logged_in = True
+        return True
+
+    # 2) Cookie başarısız → tam giriş yap
+    log.info("🔑 Yeni giriş yapılıyor...")
+    auth.login()
+    return auth.is_logged_in
+
+
 def main():
     args = parse_args()
     log.info("=" * 60)
@@ -47,13 +66,14 @@ def main():
     with Browser() as browser:
         driver = browser.driver
         auth = Auth(driver)
+        session = SessionManager(driver)
+        auth.session_manager = session
         trader = Trader(driver)
 
         # ── Keşif Modu ────────────────────────────────────────
         if args.action == "explore":
             log.info("Keşif modu: İnternet Şubesi sayfa yapısı inceleniyor...")
             from config.settings import KUVEYTTURK_URL
-            import time
 
             driver.get(KUVEYTTURK_URL)
             log.info("Sayfa yükleniyor, 8 saniye bekleniyor...")
@@ -66,19 +86,63 @@ def main():
             log.info("Keşif tamamlandı.")
             return
 
-        # ── Giriş ─────────────────────────────────────────────
+        # ── Giriş (session-aware) ─────────────────────────────
         try:
-            auth.login()
+            login_with_session(auth, session)
         except Exception as e:
             log.error(f"Giriş yapılamadı: {e}")
             send_telegram_message(f"❌ İnternet Şubesi girişi başarısız: {e}")
             sys.exit(1)
 
+        if not auth.is_logged_in:
+            log.error("Giriş başarısız!")
+            send_telegram_message("❌ İnternet Şubesi girişi başarısız!")
+            sys.exit(1)
+
         # ── Giriş Testi ───────────────────────────────────────
         if args.action == "login-test":
+            info = session.session_info()
             log.info("✅ Giriş testi başarılı!")
-            send_telegram_message("✅ İnternet Şubesi giriş testi başarılı!")
+            log.info(f"   Oturum yaşı: {info['session_age_minutes']:.1f} dk")
+            send_telegram_message(
+                "✅ İnternet Şubesi giriş testi başarılı!\n"
+                f"📁 Cookie dosyası: {'var' if info['cookie_file_exists'] else 'yok'}"
+            )
             auth.logout()
+            return
+
+        # ── Serve Modu: Oturumu canlı tut ─────────────────────
+        if args.action == "serve":
+            log.info("🔄 Serve modu — oturum canlı tutulacak...")
+            send_telegram_message(
+                "🟢 <b>İhlamur Serve Modu Aktif</b>\n"
+                "Oturum canlı tutulacak, sona erdiğinde yeniden giriş yapılacak."
+            )
+
+            def on_expired():
+                """Oturum sona erdiğinde yeniden giriş yap."""
+                log.info("🔄 Yeniden giriş yapılıyor (oturum sona erdi)...")
+                auth.is_logged_in = False
+                auth.login()
+                if auth.is_logged_in:
+                    log.info("✅ Yeniden giriş başarılı!")
+                else:
+                    raise Exception("Yeniden giriş başarısız!")
+
+            session.start_keepalive(on_session_expired=on_expired)
+
+            try:
+                # Ana thread burada bekle (Ctrl+C ile çıkılabilir)
+                while True:
+                    time.sleep(30)
+                    if not auth.is_logged_in:
+                        log.warning("Oturum kaybedildi, bekleniyor...")
+            except KeyboardInterrupt:
+                log.info("Serve modu durduruluyor (Ctrl+C)...")
+                send_telegram_message("🔴 İhlamur Serve modu durduruldu (Ctrl+C).")
+            finally:
+                session.stop_keepalive()
+                auth.logout()
             return
 
         # ── Portföy ───────────────────────────────────────────
@@ -116,7 +180,6 @@ def main():
 
             log.info(f"Emir hazırlandı: {order}")
 
-            # Kullanıcıya onay
             if args.price:
                 total = order.total_value()
                 log.info(f"Toplam tutar: {total:,.2f} TL")

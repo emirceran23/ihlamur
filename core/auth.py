@@ -38,6 +38,7 @@ class Auth:
         self.driver = driver
         self.wait = WebDriverWait(driver, 15)
         self.is_logged_in = False
+        self.session_manager = None  # main.py'den set edilir
 
     # ──────────────────────────────────────────────────────────
     #  LOGIN
@@ -242,6 +243,12 @@ class Auth:
                 take_screenshot(self.driver, "✅ Giriş başarılı")
                 send_telegram_message("✅ KuveytTürk İnternet Şubesi girişi başarılı!")
                 self.is_logged_in = True
+
+                # Cookie'leri kaydet — session yöneticisi varsa
+                if self.session_manager:
+                    self.session_manager.save_cookies()
+                    log.info("Cookie'ler kaydedildi (yeni oturum).")
+
                 return True
             else:
                 take_screenshot(self.driver, "❌ Mobil onay timeout")

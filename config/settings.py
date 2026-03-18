@@ -28,6 +28,13 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# ── Oturum Yönetimi ────────────────────────────────────────
+SESSION_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "session")
+SESSION_COOKIE_FILE = os.path.join(SESSION_DIR, "cookies.json")
+SESSION_CHECK_INTERVAL = 60      # saniye — oturum canlılık kontrolü
+SESSION_KEEPALIVE_URL = "https://isube.kuveytturk.com.tr"  # keep-alive için
+SESSION_MAX_AGE = 1800           # saniye (30 dk) — cookie yaşı aşılırsa yeniden giriş
+
 # ── İşlem Limitleri ───────────────────────────────────────
 MAX_ORDER_AMOUNT = 50000     # TL - tek seferde max işlem tutarı
 MAX_DAILY_TRADES = 20        # günlük max işlem sayısı
