@@ -428,15 +428,20 @@ class Auth:
             ifr_src = (iframe.get_attribute("src") or "-")[:80]
             debug_msg += f"  {i+1}. id={ifr_id} name={ifr_name} src={ifr_src}\n"
 
-        # Ana sayfadaki input'lar
+        # Ana sayfadaki input'lar — görünürlük bilgisi ile
         inputs = self.driver.find_elements(By.TAG_NAME, "input")
         debug_msg += f"\n<b>📝 Ana sayfa Input'lar ({len(inputs)}):</b>\n"
-        for i, inp in enumerate(inputs[:15]):
+        for i, inp in enumerate(inputs[:20]):
             inp_id = inp.get_attribute("id") or "-"
             inp_name = inp.get_attribute("name") or "-"
             inp_type = inp.get_attribute("type") or "-"
             inp_value = (inp.get_attribute("value") or "-")[:20]
-            debug_msg += f"  {i+1}. id={inp_id} name={inp_name} type={inp_type} val={inp_value}\n"
+            is_displayed = inp.is_displayed()
+            size = inp.size
+            debug_msg += (
+                f"  {i+1}. id={inp_id} name={inp_name} type={inp_type} "
+                f"val={inp_value} visible={is_displayed} size={size['width']}x{size['height']}\n"
+            )
 
         # iframe'lerin içine gir ve kontrol et
         for i, iframe in enumerate(iframes):
