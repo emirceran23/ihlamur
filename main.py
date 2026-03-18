@@ -105,6 +105,8 @@ def main():
                 "/logout — Çıkış\n"
                 "/status — Durum\n"
                 "/screenshot — Ekran görüntüsü\n"
+                "/explore — İnteraktif sayfa keşfi\n"
+                "/cancel — Botu durdur\n"
                 "/help — Yardım"
             )
 
