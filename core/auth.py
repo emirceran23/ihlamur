@@ -196,12 +196,43 @@ class Auth:
                 take_screenshot(self.driver, "❌ DEVAM butonu bulunamadı")
                 raise Exception("DEVAM butonu bulunamadı!")
 
-            # ── Adım 6: Mobil onay bekle ──────────────────────────
+            # ── Adım 6: Güvenlik Resmi Doğrulama — GİRİŞ ──────────
+            # DEVAM sonrası "Güvenlik resminizi doğrulayın" sayfası açılır.
+            # Türk Bayrağı gösterilir, kullanıcı doğrulayıp GİRİŞ'e basar.
+            log.info("Güvenlik resmi doğrulama sayfası kontrol ediliyor...")
+            take_screenshot(self.driver, "🔐 Güvenlik resmi doğrulama")
+            send_telegram_message(
+                "🔐 <b>Güvenlik Resmi Doğrulama</b>\n"
+                "Güvenlik resminizi (Türk Bayrağı) kontrol edin.\n"
+                "Bot otomatik olarak GİRİŞ butonuna tıklayacak..."
+            )
+
+            giris_btn = self._find_element(
+                possible_selectors=[
+                    (By.XPATH, "//input[@value='GİRİŞ']"),
+                    (By.XPATH, "//button[contains(text(), 'GİRİŞ')]"),
+                    (By.XPATH, "//input[contains(@value, 'RİŞ')]"),
+                    (By.CSS_SELECTOR, "input[type='submit']"),
+                    (By.ID, "btnLogin"),
+                    (By.ID, "LoginButton"),
+                ],
+                description="GİRİŞ butonu",
+                timeout=10,
+            )
+
+            if giris_btn:
+                self.driver.execute_script("arguments[0].click();", giris_btn)
+                log.info("✅ GİRİŞ tıklandı.")
+                time.sleep(3)
+                take_screenshot(self.driver, "✅ GİRİŞ sonrası")
+            else:
+                log.warning("GİRİŞ butonu bulunamadı, sayfa zaten ilerlemiş olabilir.")
+
+            # ── Adım 7: Mobil onay bekle ──────────────────────────
             log.info("📱 Mobil onay bekleniyor...")
             send_telegram_message(
                 "📱 <b>Mobil Onay Gerekli!</b>\n"
-                "1. Telefonunuza gelen onay bildirimini onaylayın.\n"
-                "2. Türk Bayrağı resmini seçin.\n"
+                "Telefonunuza gelen onay bildirimini onaylayın.\n"
                 f"⏱ Bekleme süresi: {PHONE_VERIFICATION_TIMEOUT} saniye"
             )
             take_screenshot(self.driver, "📱 Mobil onay bekleniyor")
@@ -389,11 +420,12 @@ class Auth:
                 return True
 
             # Sayfa içeriğinde dashboard elementleri
+            # NOT: "Hoş Geldiniz" login sayfasında da var — kullanma!
             try:
                 page_text = self.driver.find_element(By.TAG_NAME, "body").text
                 if any(kw in page_text for kw in [
-                    "Hoş Geldiniz", "Hesaplarım", "Ana Sayfa",
-                    "Hesap Özeti", "Bakiye"
+                    "Hesaplarım", "Hesap Özeti", "Bakiye",
+                    "Havale", "EFT", "Döviz", "Yatırım",
                 ]):
                     log.info("✅ Dashboard içeriği algılandı!")
                     return True
