@@ -472,8 +472,24 @@ class Trader:
                     f"Mevcut seçenekler: {[o[0] for o in options[:15]]}"
                 )
 
-            # Seçim sonrası fiyat tablosunun yüklenmesini bekle
-            time.sleep(2)
+            # Seçim sonrası jQuery change event'ini tetikle
+            # KuveytTürk jQuery/AJAX sitesi — select_by_visible_text
+            # Selenium'un native seçimi change event'ini tetiklemeyebilir.
+            # Hem native hem jQuery change event'i gönderiyoruz.
+            self.driver.execute_script("""
+                var el = arguments[0];
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                if (typeof jQuery !== 'undefined') {
+                    jQuery(el).trigger('change');
+                }
+                if (typeof $ !== 'undefined') {
+                    $(el).trigger('change');
+                }
+            """, select_el)
+            log.info("  change event tetiklendi (native + jQuery)")
+
+            # Fiyat tablosunun yüklenmesini bekle
+            time.sleep(3)
             take_screenshot(self.driver, f"symbol_selected_{symbol}")
             return
 

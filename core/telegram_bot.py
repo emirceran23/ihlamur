@@ -888,7 +888,15 @@ class TelegramBot:
                         f"❌ '{value}' dropdown'da bulunamadı.\n"
                         f"Mevcut seçenekler: {opts_list}"
                     )
-                time.sleep(1)
+                else:
+                    # jQuery change event tetikle — KuveytTürk AJAX
+                    self.driver.execute_script("""
+                        var el = arguments[0];
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (typeof jQuery !== 'undefined') { jQuery(el).trigger('change'); }
+                        if (typeof $ !== 'undefined') { $(el).trigger('change'); }
+                    """, el)
+                time.sleep(2)
                 take_screenshot(self.driver, "⌨️ Select sonrası")
                 return
 
