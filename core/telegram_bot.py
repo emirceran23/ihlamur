@@ -675,6 +675,7 @@ class TelegramBot:
             "• <code>scan</code> — Sayfayı tara (görünür elementler)\n"
             "• <code>deepscan</code> — Derin tara (gizli menüler dahil)\n"
             "• <code>html</code> — #__CONTENT__ iç HTML'ini al\n"
+            "• <code>kapat</code> — Açık popup/modal'ı kapat\n"
             "• <code>bitti</code> — Explore modundan çık\n"
         )
 
@@ -755,13 +756,18 @@ class TelegramBot:
                 self._explore_get_html()
                 return
 
+            # ── kapat — popup/modal kapat ─────────────────────
+            if lower in ("kapat", "close", "tamam"):
+                self._explore_close_popup()
+                return
+
             # ── Bilinmeyen ────────────────────────────────────
             send_telegram_message(
                 "❓ Anlaşılamadı. Komutlar:\n"
                 "<code>tıkla</code>, <code>yaz</code>, <code>git</code>, "
                 "<code>scroll</code>, <code>bekle</code>, <code>js</code>, "
                 "<code>scan</code>, <code>deepscan</code>, <code>html</code>, "
-                "<code>bitti</code>"
+                "<code>kapat</code>, <code>bitti</code>"
             )
 
         except Exception as e:
@@ -1190,6 +1196,69 @@ class TelegramBot:
 
         except Exception as e:
             send_telegram_message(f"❌ HTML alınamadı: {e}")
+
+    # ── EXPLORE: Popup kapat ──────────────────────────────────
+    def _explore_close_popup(self):
+        """
+        Açık popup/modal/overlay'leri kapatır.
+        KuveytTürk popup yapısı (kaynak HTML):
+          <div id="__MESSAGEBOX__">
+            <input type="button" class="BoxButtonClose" />  ← altın çarpı (sağ üst)
+            <input type="button" value="TAMAM" class="BoxButtonOK" /> ← TAMAM butonu
+          </div>
+        Ayrıca __LIGHTBOX__, __POPUPBOX__, __INFOBOX__ overlay'leri.
+        """
+        try:
+            closed = self.driver.execute_script("""
+                var closed = [];
+
+                // 1. TAMAM butonlarını tıkla
+                var buttons = document.querySelectorAll(
+                    'input.BoxButtonOK, input.BoxButtonClose, ' +
+                    'input[value="TAMAM"], input[value="Tamam"], ' +
+                    'button.BoxButtonOK, button.BoxButtonClose'
+                );
+                buttons.forEach(function(btn) {
+                    if (btn.offsetParent !== null) {
+                        btn.click();
+                        closed.push('button: ' + (btn.value || btn.className));
+                    }
+                });
+
+                // 2. Popup container'ları temizle
+                ['__MESSAGEBOX__', '__LIGHTBOX__', '__POPUPBOX__', '__INFOBOX__'].forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el && el.innerHTML.trim().length > 0) {
+                        el.innerHTML = '';
+                        closed.push('cleared: #' + id);
+                    }
+                });
+
+                // 3. Overlay arka planları gizle
+                ['__LOADINGBACKGROUND__', '__TIMEOUTBACKGROUND__'].forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el && el.style.display !== 'none') {
+                        el.style.display = 'none';
+                        closed.push('hidden: #' + id);
+                    }
+                });
+
+                return closed;
+            """)
+
+            if closed:
+                send_telegram_message(
+                    f"✅ Popup kapatıldı:\n" +
+                    "\n".join(f"  • {c}" for c in closed)
+                )
+            else:
+                send_telegram_message("ℹ️ Açık popup bulunamadı.")
+
+            time.sleep(1)
+            take_screenshot(self.driver, "🔒 Popup kapatıldı")
+
+        except Exception as e:
+            send_telegram_message(f"❌ Popup kapatma hatası: {e}")
 
     # ── EXPLORE: Sayfa tarama ─────────────────────────────────
     def _explore_scan_page(self, deep: bool = False):

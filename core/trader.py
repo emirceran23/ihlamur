@@ -293,10 +293,20 @@ class Trader:
 
     def place_order(self, order: Order) -> bool:
         """
-        TradePlus üzerinde emir gönderir.
+        Hisse Alış/Satış emri gönderir.
 
-        NOT: Selector'lar TradePlus arayüzüne göre güncellenmelidir.
-        İlk çalıştırmada explore_trade_page() ile sayfa yapısını keşfedin.
+        Keşif (2026-03-19) — tüm akış test edildi, çalışıyor:
+
+        Akış (Alış):
+          1. Yatırım → Hisse Alış sayfasına git
+          2. Hisse seç (SelectedStockCode custom selectbox)
+          3. İLERİ tıkla → 2. adım (lot/fiyat) yüklenir
+          4. Fiyat seç (SelectedPrice custom selectbox) — "9,050" gibi
+          5. Lot gir (input#Lot)
+          6. İLERİ tıkla → onay popup'ı açılır
+          7. Sonuç: "ALBRK Hissesi için bir lotu 9,050 TL üzerinden 2 Lot emriniz alınmıştır."
+          8. Popup'ı kapat (TAMAM + BoxButtonClose)
+          9. Ana menüye dön
         """
         log.info(f"Emir gönderiliyor: {order}")
 
@@ -305,49 +315,59 @@ class Trader:
             return False
 
         try:
-            # ── Adım 1: İşlem sayfasına git (alış/satış sayfasını direkt aç) ──
+            # ── Adım 1: İşlem sayfasına git ──────────────────
             self._navigate_to_trade_page(order.side)
 
-            # ── Adım 2: Alış/Satış sayfa doğrulaması ─────────
+            # ── Adım 2: Sayfa doğrulaması ─────────────────────
             self._select_side(order.side)
 
-            # ── Adım 3: Hisse sembolünü gir ──────────────────
+            # ── Adım 3: Hisse sembolünü seç ──────────────────
             self._enter_symbol(order.symbol)
 
-            # ── Adım 4: İLERİ — sembol onayı ─────────────────
-            self._submit_order()
+            # ── Adım 4: İLERİ — sembol onayı → 2. adım ──────
+            self._click_ileri()
+            time.sleep(2)
+            take_screenshot(self.driver, f"step2_{order.symbol}")
 
-            # ── Adım 5: 2. ekran — lot/fiyat formu ───────────
-            # İLERİ sonrası yeni form yükleniyor — bekle
+            # ── Adım 5: Fiyat seç (custom selectbox) ─────────
+            if order.order_type == OrderType.LIMIT and order.price:
+                self._select_price(order.price)
+            else:
+                # Piyasa emri: ilk fiyatı seç (mevcut fiyat)
+                self._select_first_price()
+
+            # ── Adım 6: Lot gir ──────────────────────────────
+            self._enter_lot(order.quantity)
+
+            # ── Adım 7: İLERİ — emir gönder ──────────────────
+            self._click_ileri()
             time.sleep(2)
 
-            # ── Adım 6: Miktarı gir ──────────────────────────
-            self._enter_quantity(order.quantity)
+            # ── Adım 8: Sonuç ekranı — popup'ı oku ───────────
+            success = self._read_order_result()
 
-            # ── Adım 7: Fiyatı gir (limit emir ise) ──────────
-            if order.order_type == OrderType.LIMIT and order.price:
-                self._enter_price(order.price)
+            # ── Adım 9: Popup'ı kapat ────────────────────────
+            self._close_result_popup()
 
-            # ── Adım 8: GÖNDER ───────────────────────────────
-            self._submit_order()
-
-            # ── Adım 9: Onay ─────────────────────────────────
-            success = self._confirm_order()
+            # ── Adım 10: Ana menüye dön ──────────────────────
+            self._go_home()
 
             if success:
                 self.daily_trade_count += 1
                 log.info(f"✅ Emir başarıyla gönderildi: {order}")
-                send_telegram_message(f"✅ Emir gönderildi:\n{order}")
             else:
                 log.error(f"❌ Emir gönderilemedi: {order}")
-                send_telegram_message(f"❌ Emir başarısız:\n{order}")
 
             return success
 
         except Exception as e:
             take_screenshot(self.driver, f"order_error_{order.symbol}")
             log.error(f"Emir hatası: {e}")
-            send_telegram_message(f"❌ Emir hatası:\n{order}\nHata: {e}")
+            # Popup varsa kapatmayı dene
+            try:
+                self._close_result_popup()
+            except Exception:
+                pass
             raise
 
     def _safety_checks(self, order: Order) -> bool:
@@ -621,72 +641,234 @@ class Trader:
             log.info("SATIŞ sayfasına yönlendiriliyor...")
             self._navigate_to_submenu_item("Hisse Satış", "HİSSE SATIŞ")
 
-    def _enter_quantity(self, quantity: int):
+    def _enter_lot(self, quantity: int):
         """
         Lot/adet girer.
-        HİSSE ALIŞ akışı: sembol seçildikten sonra İLERİ'ye basılır,
-        2. adımda lot/fiyat alanları gelir (HTML'den doğrulanacak).
+        Keşif (2026-03-19 scan): input#Lot — normal text input.
         """
-        log.info(f"Miktar giriliyor: {quantity}")
-        qty_input = self._find_clickable(
+        log.info(f"Lot giriliyor: {quantity}")
+        lot_input = self._find_clickable(
             selectors=[
-                (By.CSS_SELECTOR, "input[name*='lot']"),
-                (By.CSS_SELECTOR, "input[name*='Lot']"),
-                (By.CSS_SELECTOR, "input[name*='miktar']"),
-                (By.CSS_SELECTOR, "input[name*='adet']"),
+                (By.ID, "Lot"),
+                (By.CSS_SELECTOR, "input[name='Lot']"),
+                (By.CSS_SELECTOR, "input[id*='Lot']"),
                 (By.CSS_SELECTOR, "input[id*='lot']"),
-                (By.CSS_SELECTOR, "input[id*='miktar']"),
                 (By.XPATH, "//label[contains(text(),'Lot')]/following::input[1]"),
-                (By.XPATH, "//label[contains(text(),'Miktar')]/following::input[1]"),
-                (By.XPATH, "//label[contains(text(),'Adet')]/following::input[1]"),
             ],
-            description="Lot/miktar alanı",
+            description="Lot alanı",
         )
-        if qty_input:
-            qty_input.clear()
-            qty_input.send_keys(str(quantity))
-            log.info(f"✅ Miktar girildi: {quantity}")
+        if lot_input:
+            lot_input.clear()
+            lot_input.send_keys(str(quantity))
+            log.info(f"✅ Lot girildi: {quantity}")
         else:
-            take_screenshot(self.driver, "qty_not_found")
-            raise Exception("Lot/miktar giriş alanı bulunamadı!")
+            take_screenshot(self.driver, "lot_not_found")
+            raise Exception("Lot giriş alanı bulunamadı!")
 
-    def _enter_price(self, price: float):
+    def _select_price(self, price: float):
         """
-        Fiyat girer. KuveytTürk sitenin virgüllü format beklediği bilinmektedir.
-        Ör: 320.50 → "320,50" olarak girer.
+        Fiyat seçer — SelectedPrice custom selectbox widget.
+        Keşif (2026-03-19 scan):
+          yaz #SelectedPrice_textinput değer → custom selectbox
+          Fiyat formatı: "9,050" (virgüllü, TL)
+
+        Strateji: _enter_symbol ile aynı — textinput'a tıkla, container'dan seç.
+        Fiyat eşleşmesi: verilen float → virgüllü string'e çevir → contains eşleşme.
         """
-        log.info(f"Fiyat giriliyor: {price}")
-        price_input = self._find_clickable(
-            selectors=[
-                (By.CSS_SELECTOR, "input[name*='fiyat']"),
-                (By.CSS_SELECTOR, "input[name*='Fiyat']"),
-                (By.CSS_SELECTOR, "input[name*='price']"),
-                (By.CSS_SELECTOR, "input[id*='fiyat']"),
-                (By.CSS_SELECTOR, "input[id*='Fiyat']"),
-                (By.XPATH, "//label[contains(text(),'Fiyat')]/following::input[1]"),
-                (By.XPATH, "//label[contains(text(),'Son Fiyat')]/following::input[1]"),
-            ],
-            description="Fiyat alanı",
+        log.info(f"Fiyat seçiliyor: {price}")
+        # Float → site formatı: 9.05 → "9,050" veya "9,05"
+        price_str = f"{price:.3f}".replace(".", ",")       # "9,050"
+        price_str_2 = f"{price:.2f}".replace(".", ",")     # "9,05"
+        price_str_int = f"{int(price)}" if price == int(price) else None
+
+        self._select_custom_selectbox(
+            base_id="SelectedPrice",
+            search_values=[price_str, price_str_2, price_str_int] if price_str_int else [price_str, price_str_2],
+            description="Fiyat",
         )
-        if price_input:
-            price_input.clear()
-            price_str = f"{price:.2f}".replace(".", ",")  # 320.50 → "320,50"
-            price_input.send_keys(price_str)
-            log.info(f"✅ Fiyat girildi: {price_str}")
-        else:
-            take_screenshot(self.driver, "price_not_found")
-            raise Exception("Fiyat giriş alanı bulunamadı!")
 
-    def _submit_order(self):
+    def _select_first_price(self):
+        """
+        Piyasa emri: mevcut (ilk) fiyatı seç.
+        Container'daki ilk gerçek opsiyon (-- Seçiniz -- hariç).
+        """
+        log.info("Piyasa emri — ilk fiyat seçiliyor...")
+        try:
+            textinput = self.driver.find_element(By.ID, "SelectedPrice_textinput")
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                textinput,
+            )
+            time.sleep(1)
+
+            container = None
+            for suffix in ["_container", "_listbox"]:
+                try:
+                    c = self.driver.find_element(By.ID, f"SelectedPrice{suffix}")
+                    if c.is_displayed():
+                        container = c
+                        break
+                except Exception:
+                    continue
+
+            if not container:
+                self.driver.execute_script("""
+                    var c = document.getElementById('SelectedPrice_container');
+                    if (c) c.style.display = 'block';
+                """)
+                time.sleep(0.5)
+                container = self.driver.find_element(By.ID, "SelectedPrice_container")
+
+            items = container.find_elements(By.CSS_SELECTOR, "div, li, a, span")
+            for item in items:
+                t = item.text.strip()
+                if t and t != "--" and "Seçiniz" not in t and len(t) >= 2:
+                    try:
+                        item.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", item)
+                    log.info(f"✅ İlk fiyat seçildi: {t}")
+                    time.sleep(1)
+                    return
+
+            log.warning("İlk fiyat bulunamadı, JS fallback...")
+            # Fallback: gizli <select>'ten ilk gerçek option'ı seç
+            self.driver.execute_script("""
+                var sel = document.getElementById('SelectedPrice');
+                if (sel && sel.options.length > 1) {
+                    sel.selectedIndex = 1;
+                    sel.value = sel.options[1].value;
+                    var ti = document.getElementById('SelectedPrice_textinput');
+                    var bi = document.getElementById('SelectedPrice_input');
+                    if (ti) ti.value = sel.options[1].text.trim();
+                    if (bi) bi.value = sel.options[1].value;
+                    [sel, ti, bi].filter(Boolean).forEach(function(el) {
+                        ['focus','change','input','blur'].forEach(function(evt) {
+                            el.dispatchEvent(new Event(evt, { bubbles: true }));
+                        });
+                    });
+                    if (typeof jQuery !== 'undefined') jQuery(sel).val(sel.options[1].value).trigger('change');
+                }
+            """)
+            time.sleep(1)
+        except Exception as e:
+            log.error(f"Fiyat seçim hatası: {e}")
+            take_screenshot(self.driver, "price_select_error")
+            raise
+
+    def _select_custom_selectbox(self, base_id: str, search_values: list[str], description: str):
+        """
+        Genel custom selectbox seçici.
+        KuveytTürk widget yapısı:
+          {base_id}_textinput → tıkla → container açılır
+          {base_id}_container → öğe tıkla → seçim yapılır
+          {base_id}           → gizli <select>
+        """
+        try:
+            textinput = self.driver.find_element(By.ID, f"{base_id}_textinput")
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                textinput,
+            )
+            time.sleep(1)
+
+            container = None
+            for suffix in ["_container", "_listbox"]:
+                try:
+                    c = self.driver.find_element(By.ID, f"{base_id}{suffix}")
+                    if c.is_displayed():
+                        container = c
+                        break
+                except Exception:
+                    continue
+
+            if not container:
+                self.driver.execute_script(f"""
+                    var c = document.getElementById('{base_id}_container');
+                    if (c) c.style.display = 'block';
+                """)
+                time.sleep(0.5)
+                try:
+                    container = self.driver.find_element(By.ID, f"{base_id}_container")
+                except Exception:
+                    pass
+
+            if container:
+                items = container.find_elements(By.CSS_SELECTOR, "div, li, a, span")
+                for sv in search_values:
+                    if not sv:
+                        continue
+                    for item in items:
+                        item_text = item.text.strip()
+                        if sv in item_text and len(item_text) >= 2:
+                            try:
+                                item.click()
+                            except Exception:
+                                self.driver.execute_script("arguments[0].click();", item)
+                            log.info(f"✅ {description} seçildi (tıklama): {item_text}")
+                            time.sleep(1)
+                            return
+                # Bulunamazsa loglama
+                all_texts = list(dict.fromkeys(
+                    it.text.strip() for it in items[:30] if it.text.strip()
+                ))
+                log.warning(f"  '{search_values}' container'da bulunamadı! Mevcut: {all_texts[:15]}")
+
+        except Exception as e:
+            log.warning(f"  Custom selectbox tıklama başarısız: {e}")
+
+        # Fallback: JS ile gizli <select>
+        log.info(f"  {description} JS fallback deneniyor...")
+        result = self.driver.execute_script("""
+            var baseId = arguments[0];
+            var searches = arguments[1];
+            var sel = document.getElementById(baseId);
+            if (!sel || sel.tagName !== 'SELECT') return { error: 'select bulunamadı' };
+
+            var target = null;
+            for (var s = 0; s < searches.length && !target; s++) {
+                var sv = searches[s];
+                if (!sv) continue;
+                for (var i = 0; i < sel.options.length; i++) {
+                    var t = sel.options[i].text.trim();
+                    if (t.indexOf(sv) >= 0) {
+                        target = { index: i, text: t, value: sel.options[i].value };
+                        break;
+                    }
+                }
+            }
+            if (!target) {
+                var opts = [];
+                for (var i = 0; i < Math.min(sel.options.length, 15); i++) opts.push(sel.options[i].text.trim());
+                return { error: 'bulunamadı', options: opts };
+            }
+            sel.selectedIndex = target.index;
+            sel.value = target.value;
+            var ti = document.getElementById(baseId + '_textinput');
+            var bi = document.getElementById(baseId + '_input');
+            if (ti) ti.value = target.text;
+            if (bi) bi.value = target.value;
+            [sel, ti, bi].filter(Boolean).forEach(function(el) {
+                ['focus','change','input','blur'].forEach(function(evt) {
+                    el.dispatchEvent(new Event(evt, { bubbles: true }));
+                });
+            });
+            if (typeof jQuery !== 'undefined') jQuery(sel).val(target.value).trigger('change');
+            return { ok: true, text: target.text, value: target.value };
+        """, base_id, search_values)
+
+        if isinstance(result, dict) and result.get("error"):
+            take_screenshot(self.driver, f"{description}_not_found")
+            raise Exception(f"'{search_values}' {description} dropdown'da bulunamadı! "
+                            f"Mevcut: {result.get('options', [])}")
+        elif isinstance(result, dict) and result.get("ok"):
+            log.info(f"✅ {description} seçildi (JS): {result.get('text')}")
+        time.sleep(1)
+
+    def _click_ileri(self):
         """
         İLERİ butonuna basar.
-
-        Keşif (2026-03-19):
-          - deepscan çıktısında buton text = "İLERİ"
-          - Hisse seçilince fiyat tablosu yükleniyor, sayfa uzuyor
-          - İLERİ butonu ekran dışında kalabiliyor → scroll + JS click
-          Adım 1 (sembol seçimi) → İLERİ → Adım 2 (lot/fiyat)
-          Adım 2 (lot/fiyat dolu) → İLERİ (veya GÖNDER) → onay
+        Keşif (2026-03-19): scan'de "tıkla İLERİ" — submit input veya button.
         """
         log.info("İLERİ butonuna basılıyor...")
         ileri_btn = self._find_clickable(
@@ -696,9 +878,6 @@ class Trader:
                 (By.XPATH, "//button[normalize-space()='İLERİ']"),
                 (By.XPATH, "//button[normalize-space()='ILERI']"),
                 (By.XPATH, "//input[@type='button' and contains(@value,'İLERİ')]"),
-                # 2. adım — Gönder butonu (form submit)
-                (By.XPATH, "//input[@type='submit' and contains(@value,'GÖNDER')]"),
-                (By.XPATH, "//button[normalize-space()='GÖNDER']"),
                 (By.CSS_SELECTOR, "input[type='submit']"),
                 (By.CSS_SELECTOR, "button[type='submit']"),
             ],
@@ -706,10 +885,8 @@ class Trader:
             timeout=8,
         )
         if ileri_btn:
-            # Buton ekran dışında olabilir — scroll into view + JS click
             self.driver.execute_script(
-                "arguments[0].scrollIntoView({block:'center'}); "
-                "arguments[0].focus();",
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].focus();",
                 ileri_btn,
             )
             time.sleep(0.5)
@@ -717,46 +894,107 @@ class Trader:
                 ileri_btn.click()
             except Exception:
                 self.driver.execute_script("arguments[0].click();", ileri_btn)
-            log.info(f"✅ Buton tıklandı: {ileri_btn.get_attribute('value') or ileri_btn.text}")
+            log.info(f"✅ İLERİ tıklandı: {ileri_btn.get_attribute('value') or ileri_btn.text}")
             time.sleep(2)
         else:
             take_screenshot(self.driver, "ileri_not_found")
             raise Exception("İLERİ butonu bulunamadı!")
 
-    def _confirm_order(self) -> bool:
+    def _read_order_result(self) -> bool:
         """
-        Emir onay ekranı — KuveytTürk genellikle modal veya yeni sayfa açar.
-        "Hisse almak istiyorum." mesajı onay niyeti olarak altta görünüyor
-        (ekran görüntüsü 4). Asıl onay butonu HTML'den doğrulanacak.
+        Sonuç popup/sayfasını oku.
+        Ekran görüntüsünden (2026-03-19):
+          ✅ "ALBRK Hissesi için bir lotu 9,050 TL üzerinden 2 Lot emriniz alınmıştır."
+          Popup: class="BoxButtonOK" value="TAMAM" + class="BoxButtonClose" (çarpı)
+          Container: #__MESSAGEBOX__ veya popup div
         """
-        log.info("Emir onaylanıyor...")
-        time.sleep(1.5)
+        log.info("Sonuç popup'ı okunuyor...")
+        time.sleep(2)
 
-        confirm_btn = self._find_clickable(
-            selectors=[
-                (By.XPATH, "//input[@type='submit' and contains(@value,'ONAYLA')]"),
-                (By.XPATH, "//input[@type='submit' and contains(@value,'Onayla')]"),
-                (By.XPATH, "//button[contains(text(),'ONAYLA')]"),
-                (By.XPATH, "//button[contains(text(),'Onayla')]"),
-                (By.XPATH, "//button[contains(text(),'Evet')]"),
-                (By.XPATH, "//button[contains(text(),'Tamam')]"),
-                (By.CSS_SELECTOR, ".onay-btn"),
-                (By.CSS_SELECTOR, ".confirm-button"),
-                (By.CSS_SELECTOR, ".modal .btn-primary"),
-            ],
-            description="Onay butonu",
-            timeout=5,
-        )
-        if confirm_btn:
-            try:
-                confirm_btn.click()
-            except Exception:
-                self.driver.execute_script("arguments[0].click();", confirm_btn)
-            time.sleep(2)
-            log.info("✅ Emir onaylandı.")
+        # Başarı mesajı kontrolü
+        try:
+            body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            if "emriniz alınmıştır" in body_text:
+                log.info("✅ Emir başarıyla alındı!")
+                take_screenshot(self.driver, "order_success")
+                return True
+            elif "hata" in body_text.lower() or "gerçekleştirilemedi" in body_text:
+                log.error(f"❌ Emir başarısız: {body_text[:200]}")
+                take_screenshot(self.driver, "order_failed")
+                return False
+        except Exception as e:
+            log.warning(f"  Sonuç metni okunamadı: {e}")
 
         take_screenshot(self.driver, "order_result")
-        return True  # Hata kontrolü HTML'den doğrulanınca eklenecek
+        return True  # Emin değilsek true dön — screenshot'tan kontrol edilir
+
+    def _close_result_popup(self):
+        """
+        Sonuç popup'ını kapatır.
+        KuveytTürk popup yapısı (kaynak HTML'den):
+          <div id="__MESSAGEBOX__">
+            <input type="button" class="BoxButtonClose" />  ← altın çarpı (sağ üst)
+            <input type="button" value="TAMAM" class="BoxButtonOK" /> ← TAMAM butonu
+          </div>
+        Ayrıca __LIGHTBOX__, __POPUPBOX__ gibi overlay'ler de olabilir.
+        """
+        log.info("Sonuç popup'ı kapatılıyor...")
+
+        # Yol 1: TAMAM butonuna tıkla
+        for selector in [
+            "input.BoxButtonOK",
+            "input[value='TAMAM']",
+            "input.BoxButtonClose",
+            ".BoxButtonOK",
+            ".BoxButtonClose",
+        ]:
+            try:
+                btn = self.driver.find_element(By.CSS_SELECTOR, selector)
+                if btn.is_displayed():
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                        btn,
+                    )
+                    log.info(f"✅ Popup kapatıldı: {selector}")
+                    time.sleep(1)
+                    break
+            except Exception:
+                continue
+
+        # Yol 2: JS ile tüm popup'ları kapat
+        self.driver.execute_script("""
+            // TAMAM butonlarını tıkla
+            document.querySelectorAll('input.BoxButtonOK, input.BoxButtonClose').forEach(function(btn) {
+                if (btn.offsetParent !== null) btn.click();
+            });
+            // Popup container'ları gizle
+            ['__MESSAGEBOX__', '__LIGHTBOX__', '__POPUPBOX__', '__INFOBOX__'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.innerHTML = '';
+            });
+        """)
+        log.info("  Popup'lar temizlendi (JS).")
+        time.sleep(1)
+
+    def _go_home(self):
+        """
+        Ana menüye döner.
+        Keşif (2026-03-19): #mnAkilliTagA → Akıllı Menü = dashboard.
+        """
+        log.info("Ana menüye dönülüyor...")
+        try:
+            home_link = self.driver.find_element(By.ID, "mnAkilliTagA")
+            self.driver.execute_script("arguments[0].click();", home_link)
+            time.sleep(2)
+            log.info("✅ Ana menüye dönüldü.")
+        except Exception:
+            # Fallback: URL ile git
+            try:
+                self.driver.get(self.BASE_URL + "/Main")
+                time.sleep(2)
+                log.info("✅ Ana menüye dönüldü (URL).")
+            except Exception as e:
+                log.warning(f"  Ana menüye dönülemedi: {e}")
 
     # ──────────────────────────────────────────────────────────
     # Portföy
