@@ -645,6 +645,9 @@ class Trader:
         """
         Lot/adet girer.
         Keşif (2026-03-19 scan): input#Lot — normal text input.
+        NOT: clear() + send_keys() yetersiz — site varsayılan "1" değerini
+        bırakabiliyor, append olunca "12" gibi yanlış sonuç çıkıyor.
+        Çözüm: JS ile value sıfırla → sonra yaz.
         """
         log.info(f"Lot giriliyor: {quantity}")
         lot_input = self._find_clickable(
@@ -658,8 +661,14 @@ class Trader:
             description="Lot alanı",
         )
         if lot_input:
-            lot_input.clear()
-            lot_input.send_keys(str(quantity))
+            # JS ile temizle + yaz (clear() güvenilir değil)
+            self.driver.execute_script(
+                "var el = arguments[0]; el.focus(); el.value = ''; "
+                "el.value = arguments[1]; "
+                "el.dispatchEvent(new Event('input', {bubbles:true})); "
+                "el.dispatchEvent(new Event('change', {bubbles:true}));",
+                lot_input, str(quantity),
+            )
             log.info(f"✅ Lot girildi: {quantity}")
         else:
             take_screenshot(self.driver, "lot_not_found")
