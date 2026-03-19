@@ -858,14 +858,120 @@ class TelegramBot:
         try:
             el = self._explore_find_element(selector)
 
-            # <select> elementi ise tamamen JS ile seç (jQuery change dahil)
-            if el.tag_name.lower() == "select":
-                result = self.driver.execute_script("""
-                    var sel = arguments[0];
-                    var searchVal = arguments[1].toUpperCase();
-                    var target = null;
+            # ── Custom selectbox widget algılama ──────────────
+            # KuveytTürk custom selectbox: _textinput (readonly input) + _container (gizli liste)
+            # <select> gizli, ona yazınca AJAX tetiklenmiyor.
+            # Doğru yol: _textinput'a tıkla → _container aç → içinden seç
+            el_id = el.get_attribute("id") or ""
+            is_custom_selectbox = False
+            base_id = ""
 
-                    // Prefix eşleşme → contains eşleşme
+            # Element bir custom selectbox parçası mı kontrol et
+            if el_id.endswith("_textinput") or el_id.endswith("_input"):
+                base_id = el_id.rsplit("_", 1)[0]
+                is_custom_selectbox = True
+            elif el.tag_name.lower() == "select" and el.get_attribute("style") and "display" in (el.get_attribute("style") or ""):
+                # Gizli <select> — custom widget'ın parçası
+                base_id = el_id
+                is_custom_selectbox = True
+            elif el.tag_name.lower() == "select":
+                # Görünür <select> ise de custom widget olabilir — kontrol et
+                try:
+                    self.driver.find_element(By.ID, f"{el_id}_textinput")
+                    base_id = el_id
+                    is_custom_selectbox = True
+                except Exception:
+                    pass
+
+            if is_custom_selectbox and base_id:
+                send_telegram_message(f"🔽 Custom selectbox algılandı: <code>{base_id}</code>")
+
+                # _textinput'a tıkla → container açılır
+                try:
+                    ti = self.driver.find_element(By.ID, f"{base_id}_textinput")
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                        ti,
+                    )
+                except Exception:
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                        el,
+                    )
+
+                time.sleep(1)
+
+                # Container'ı bul
+                container = None
+                for suffix in ["_container", "_listbox"]:
+                    try:
+                        c = self.driver.find_element(By.ID, f"{base_id}{suffix}")
+                        if c.is_displayed():
+                            container = c
+                            break
+                    except Exception:
+                        continue
+
+                if not container:
+                    # JS ile container aç
+                    self.driver.execute_script(f"""
+                        var c = document.getElementById('{base_id}_container');
+                        if (c) c.style.display = 'block';
+                    """)
+                    time.sleep(0.5)
+                    try:
+                        container = self.driver.find_element(By.ID, f"{base_id}_container")
+                    except Exception:
+                        pass
+
+                if container:
+                    items = container.find_elements(By.CSS_SELECTOR, "div, li, a, span")
+                    search_val = value.upper().strip()
+                    target_item = None
+
+                    for item in items:
+                        item_text = item.text.strip().upper()
+                        item_val = (item.get_attribute("value") or "").upper()
+                        item_data = (item.get_attribute("data-value") or "").upper()
+                        all_text = f"{item_text} {item_val} {item_data}"
+                        if search_val in all_text and len(item.text.strip()) >= 2:
+                            target_item = item
+                            if item_text.startswith(search_val):
+                                break
+
+                    if target_item:
+                        t = target_item.text.strip()
+                        try:
+                            target_item.click()
+                        except Exception:
+                            self.driver.execute_script("arguments[0].click();", target_item)
+                        send_telegram_message(
+                            f"✅ Seçildi (tıklama): <code>{selector}</code> ← <code>{t}</code>"
+                        )
+                        time.sleep(3)
+                        take_screenshot(self.driver, "⌨️ Selectbox sonrası")
+                        return
+                    else:
+                        all_texts = list(dict.fromkeys(
+                            item.text.strip() for item in items[:30] if item.text.strip()
+                        ))
+                        send_telegram_message(
+                            f"❌ '{value}' container'da bulunamadı.\n"
+                            f"Mevcut: {all_texts[:15]}"
+                        )
+                        take_screenshot(self.driver, "⌨️ Selectbox bulunamadı")
+                        return
+                else:
+                    send_telegram_message("⚠️ Container açılamadı, JS fallback deneniyor...")
+
+                # JS fallback — gizli <select>'i ayarla + input'ları güncelle
+                result = self.driver.execute_script("""
+                    var baseId = arguments[0];
+                    var searchVal = arguments[1].toUpperCase();
+                    var sel = document.getElementById(baseId);
+                    if (!sel || sel.tagName !== 'SELECT') return { error: 'select bulunamadı' };
+
+                    var target = null;
                     for (var i = 0; i < sel.options.length; i++) {
                         var t = sel.options[i].text.trim().toUpperCase();
                         var v = sel.options[i].value.toUpperCase();
@@ -876,8 +982,7 @@ class TelegramBot:
                     }
                     if (!target) {
                         for (var i = 0; i < sel.options.length; i++) {
-                            var t = sel.options[i].text.trim().toUpperCase();
-                            if (t.indexOf(searchVal) >= 0) {
+                            if (sel.options[i].text.trim().toUpperCase().indexOf(searchVal) >= 0) {
                                 target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
                                 break;
                             }
@@ -885,23 +990,73 @@ class TelegramBot:
                     }
                     if (!target) {
                         var opts = [];
-                        for (var i = 0; i < Math.min(sel.options.length, 15); i++) {
-                            opts.push(sel.options[i].text.trim());
-                        }
+                        for (var i = 0; i < Math.min(sel.options.length, 15); i++) opts.push(sel.options[i].text.trim());
                         return { error: true, options: opts };
                     }
 
-                    // Seçimi yap + tüm event'leri tetikle
+                    sel.selectedIndex = target.index;
+                    sel.value = target.value;
+                    var ti = document.getElementById(baseId + '_textinput');
+                    var bi = document.getElementById(baseId + '_input');
+                    if (ti) ti.value = target.text;
+                    if (bi) bi.value = target.value;
+                    [sel, ti, bi].filter(Boolean).forEach(function(el) {
+                        ['focus','change','input','blur'].forEach(function(evt) {
+                            el.dispatchEvent(new Event(evt, { bubbles: true }));
+                        });
+                    });
+                    if (typeof jQuery !== 'undefined') {
+                        jQuery(sel).val(target.value).trigger('change');
+                    }
+                    return { error: false, text: target.text, value: target.value };
+                """, base_id, value)
+
+                if result and result.get("error"):
+                    send_telegram_message(
+                        f"❌ '{value}' dropdown'da bulunamadı.\n"
+                        f"Mevcut: {result.get('options', [])}"
+                    )
+                elif result:
+                    send_telegram_message(
+                        f"✅ Seçildi (JS): <code>{selector}</code> ← <code>{result.get('text')}</code>"
+                    )
+                time.sleep(3)
+                take_screenshot(self.driver, "⌨️ Select sonrası")
+                return
+
+            # ── Görünür <select> — standart ────────────────────
+            if el.tag_name.lower() == "select":
+                result = self.driver.execute_script("""
+                    var sel = arguments[0];
+                    var searchVal = arguments[1].toUpperCase();
+                    var target = null;
+                    for (var i = 0; i < sel.options.length; i++) {
+                        var t = sel.options[i].text.trim().toUpperCase();
+                        if (t.indexOf(searchVal) === 0) {
+                            target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                            break;
+                        }
+                    }
+                    if (!target) {
+                        for (var i = 0; i < sel.options.length; i++) {
+                            if (sel.options[i].text.trim().toUpperCase().indexOf(searchVal) >= 0) {
+                                target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                                break;
+                            }
+                        }
+                    }
+                    if (!target) {
+                        var opts = [];
+                        for (var i = 0; i < Math.min(sel.options.length, 15); i++) opts.push(sel.options[i].text.trim());
+                        return { error: true, options: opts };
+                    }
                     sel.selectedIndex = target.index;
                     sel.value = target.value;
                     ['focus','change','input','blur'].forEach(function(evt) {
                         sel.dispatchEvent(new Event(evt, { bubbles: true }));
                     });
                     if (typeof jQuery !== 'undefined') {
-                        jQuery(sel).val(target.value).trigger('change').trigger('select2:select');
-                    }
-                    if (typeof $ !== 'undefined' && $ !== jQuery) {
-                        $(sel).val(target.value).trigger('change');
+                        jQuery(sel).val(target.value).trigger('change');
                     }
                     return { error: false, text: target.text, value: target.value };
                 """, el, value)
@@ -913,14 +1068,13 @@ class TelegramBot:
                     )
                 else:
                     send_telegram_message(
-                        f"✅ Seçildi (JS): <code>{selector}</code> ← "
-                        f"<code>{result['text']}</code>"
+                        f"✅ Seçildi: <code>{selector}</code> ← <code>{result['text']}</code>"
                     )
                 time.sleep(3)
                 take_screenshot(self.driver, "⌨️ Select sonrası")
                 return
 
-            # Normal input/textarea
+            # ── Normal input/textarea ──────────────────────────
             self.driver.execute_script(
                 """
                 var el = arguments[0], text = arguments[1];

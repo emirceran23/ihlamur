@@ -396,177 +396,206 @@ class Trader:
         """
         Hisse sembolünü seçer.
 
-        Keşif (2026-03-19) — ekran görüntüsü:
-          Hisse Seçiniz bölümünde bir <select> dropdown var.
-          Seçenekler: "-- Seçiniz --", "ALBRK-E", "THYAO-E", vb.
-          #SelectedStockCode_textinput → <select> elementi (veya hidden input)
-          #SelectedStockCode_input     → görünür widget (autocomplete veya <select>)
+        Keşif (2026-03-19) — DOM yapısı (inspect):
+          KuveytTürk custom selectbox widget:
+            <div class="dropdown_container" for="SelectedStockCode">
+              <input id="SelectedStockCode_input"     readonly class="selectbox back">
+              <input id="SelectedStockCode_textinput"  readonly class="selectbox text" style="width:190px">
+              <div   id="SelectedStockCode_container"  class="selectbox-wrapper" style="display:none; width:225px">
+                ... liste öğeleri (tıklanınca seçim yapılır) ...
+              </div>
+              <select id="SelectedStockCode" name="SelectedStockCode" style="display:none">
+                <option>-- Seçiniz --</option>
+                <option>ALBRK-E</option>
+                ...
+              </select>
+            </div>
 
-        Ekran görüntüsünde "ALBRK-E" formatında seçenekler var.
-        Kullanıcı "ALBRK" yazarsa "ALBRK" ile başlayan ilk opsiyonu seç.
+          Önemli: <select> gizli (display:none)!
+          Widget akışı:
+            1. _textinput'a tıkla → _container açılır (display:block)
+            2. _container içindeki öğeye tıkla → widget seçimi yapar, AJAX tetiklenir
+            3. Gizli <select>'e programatik değer yazınca site algılamıyor
 
         Strateji:
-          1. Önce <select> elementi bul
-          2. Select class ile visible_text veya value ile seç
-          3. <select> yoksa autocomplete input dene
-          4. Seçim sonrası fiyat tablosunun yüklenmesini bekle
+          Yol 1: _textinput'a tıkla → _container'dan öğeyi bul ve tıkla
+          Yol 2: JS ile widget mekanizmasını simüle et (gizli select + visible input + event)
         """
         log.info(f"Sembol giriliyor: {symbol}")
         time.sleep(0.5)
         symbol_upper = symbol.upper().strip()
 
-        # ── Yol 1: <select> dropdown ─────────────────────────
-        select_el = None
-        for by, val in [
-            (By.ID, "SelectedStockCode_textinput"),
-            (By.ID, "SelectedStockCode_input"),
-            (By.CSS_SELECTOR, "select[id*='SelectedStockCode']"),
-            (By.CSS_SELECTOR, "select[name*='SelectedStockCode']"),
-            (By.CSS_SELECTOR, "select[id*='Stock']"),
-        ]:
-            try:
-                el = self.driver.find_element(by, val)
-                if el.tag_name.lower() == "select":
-                    select_el = el
-                    log.info(f"  <select> bulundu: {by}={val}")
-                    break
-            except Exception:
-                continue
-
-        if select_el:
-            # Tüm seçenekleri JS ile oku — eşleşen value'yu bul
-            options_data = self.driver.execute_script("""
-                var sel = arguments[0];
-                var result = [];
-                for (var i = 0; i < sel.options.length; i++) {
-                    result.push({
-                        text: sel.options[i].text.trim(),
-                        value: sel.options[i].value,
-                        index: i
-                    });
-                }
-                return result;
-            """, select_el)
-
-            log.info(f"  Dropdown seçenekleri ({len(options_data)}): "
-                      f"{[o['text'] for o in options_data[:10]]}")
-
-            # Prefix eşleşme → contains eşleşme
-            target = None
-            for o in options_data:
-                if o["text"].upper().startswith(symbol_upper) or o["value"].upper().startswith(symbol_upper):
-                    target = o
-                    break
-            if not target:
-                for o in options_data:
-                    if symbol_upper in o["text"].upper() or symbol_upper in o["value"].upper():
-                        target = o
-                        break
-
-            if not target:
-                take_screenshot(self.driver, f"symbol_not_in_dropdown_{symbol}")
-                raise Exception(
-                    f"'{symbol}' dropdown'da bulunamadı! "
-                    f"Mevcut: {[o['text'] for o in options_data[:15]]}"
-                )
-
-            # ── Seçimi tamamen JavaScript ile yap ─────────────
-            # Site jQuery event handler'ları kullandığı için
-            # Selenium native select çalışmıyor. Tüm akışı JS ile simüle ediyoruz:
-            #   1. selectedIndex değiştir
-            #   2. Native Event dispatch (change, input)
-            #   3. jQuery .trigger('change') + .change()
-            #   4. Kendo UI widget varsa trigger
-            self.driver.execute_script("""
-                var sel = arguments[0];
-                var idx = arguments[1];
-                var val = arguments[2];
-
-                // 1. Seçimi yap
-                sel.selectedIndex = idx;
-                sel.value = val;
-
-                // 2. Native events — tüm olasılıkları kapsayacak şekilde
-                var events = ['focus', 'change', 'input', 'blur'];
-                for (var i = 0; i < events.length; i++) {
-                    sel.dispatchEvent(new Event(events[i], { bubbles: true }));
-                }
-
-                // 3. jQuery trigger — birden fazla yolla
-                if (typeof jQuery !== 'undefined') {
-                    jQuery(sel).val(val).trigger('change').trigger('select2:select');
-                }
-                if (typeof $ !== 'undefined' && $ !== jQuery) {
-                    $(sel).val(val).trigger('change');
-                }
-
-                // 4. Kendo UI widget (bazı bankacılık siteleri kullanır)
-                if (typeof kendo !== 'undefined') {
-                    var widget = jQuery(sel).data('kendoDropDownList');
-                    if (widget) { widget.value(val); widget.trigger('change'); }
-                }
-            """, select_el, target["index"], target["value"])
-
-            log.info(f"✅ Hisse seçildi (JS): {target['text']} "
-                      f"(value={target['value']}, index={target['index']})")
-
-            # Fiyat tablosunun AJAX ile yüklenmesini bekle
-            time.sleep(3)
-            take_screenshot(self.driver, f"symbol_selected_{symbol}")
-            return
-
-        # ── Yol 2: Autocomplete text input (fallback) ────────
-        log.info("  <select> bulunamadı, autocomplete input deneniyor...")
-        input_el = self._find_clickable(
-            selectors=[
-                (By.ID, "SelectedStockCode_input"),
-                (By.CSS_SELECTOR, "input[id*='SelectedStockCode']"),
-            ],
-            description="Hisse sembol input",
-            timeout=8,
-        )
-        if not input_el:
-            take_screenshot(self.driver, f"symbol_input_not_found_{symbol}")
-            raise Exception("Hisse sembol input alanı bulunamadı!")
-
-        input_el.clear()
-        input_el.send_keys(symbol_upper)
-        log.info(f"  Sembol yazıldı: {symbol_upper}")
-        time.sleep(1.5)
-
-        # Autocomplete listesinden seç
+        # ── Yol 1: Custom selectbox widget — tıklama ile seçim ──
         try:
-            suggestions = self.driver.find_elements(
-                By.CSS_SELECTOR,
-                "ul.ui-autocomplete li.ui-menu-item, "
-                ".autocomplete-suggestions div, "
-                ".ui-autocomplete .ui-menu-item-wrapper"
-            )
-            if suggestions:
-                selected = None
-                for s in suggestions:
-                    if symbol_upper in s.text.upper():
-                        selected = s
-                        if s.text.upper().startswith(symbol_upper):
-                            break
-                if selected:
-                    try:
-                        selected.click()
-                    except Exception:
-                        self.driver.execute_script("arguments[0].click();", selected)
-                    log.info(f"  Öneri seçildi: {selected.text.strip()[:40]}")
-                else:
-                    input_el.send_keys(Keys.ARROW_DOWN)
-                    time.sleep(0.3)
-                    input_el.send_keys(Keys.RETURN)
-                    log.info("  ENTER ile ilk öneri seçildi.")
-            else:
-                input_el.send_keys(Keys.RETURN)
-                log.warning("  Autocomplete listesi gelmedi, ENTER denendi.")
-        except Exception as e:
-            log.warning(f"  Autocomplete seçim hatası: {e}")
+            textinput = self.driver.find_element(By.ID, "SelectedStockCode_textinput")
+            log.info("  Custom selectbox widget bulundu (SelectedStockCode_textinput)")
 
-        time.sleep(2)
+            # Scroll + tıkla → dropdown container açılır
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                textinput,
+            )
+            log.info("  _textinput'a tıklandı, container açılması bekleniyor...")
+            time.sleep(1)
+
+            # Container'ı bul
+            container = None
+            for sel in [
+                "SelectedStockCode_container",
+                "SelectedStockCode_listbox",
+            ]:
+                try:
+                    c = self.driver.find_element(By.ID, sel)
+                    if c.is_displayed():
+                        container = c
+                        log.info(f"  Container açıldı: #{sel}")
+                        break
+                except Exception:
+                    continue
+
+            # Container bulunamazsa veya görünür değilse, JS ile açmayı dene
+            if not container:
+                log.info("  Container görünür değil, JS ile açma deneniyor...")
+                self.driver.execute_script("""
+                    var c = document.getElementById('SelectedStockCode_container');
+                    if (c) { c.style.display = 'block'; }
+                """)
+                time.sleep(0.5)
+                try:
+                    container = self.driver.find_element(By.ID, "SelectedStockCode_container")
+                except Exception:
+                    container = None
+
+            if container:
+                # Container içindeki tüm tıklanabilir öğeleri bul
+                items = container.find_elements(By.CSS_SELECTOR, "div, li, a, span")
+                log.info(f"  Container'da {len(items)} öğe bulundu")
+
+                # Eşleşen öğeyi bul
+                target_item = None
+                for item in items:
+                    item_text = item.text.strip().upper()
+                    item_val = (item.get_attribute("value") or "").upper()
+                    item_data = (item.get_attribute("data-value") or "").upper()
+                    all_text = f"{item_text} {item_val} {item_data}"
+                    if symbol_upper in all_text:
+                        if len(item_text) < 2 and len(item_val) < 2 and len(item_data) < 2:
+                            continue
+                        target_item = item
+                        if item_text.startswith(symbol_upper) or item_val.startswith(symbol_upper):
+                            break
+
+                if target_item:
+                    target_text = target_item.text.strip() or target_item.get_attribute("value") or "?"
+                    log.info(f"  Eşleşen öğe bulundu: '{target_text}'")
+                    try:
+                        self.driver.execute_script(
+                            "arguments[0].scrollIntoView({block:'center'});",
+                            target_item,
+                        )
+                        target_item.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", target_item)
+
+                    log.info(f"✅ Hisse seçildi (tıklama): {target_text}")
+                    time.sleep(3)
+                    take_screenshot(self.driver, f"symbol_selected_{symbol}")
+                    return
+                else:
+                    all_texts = []
+                    for item in items[:30]:
+                        t = item.text.strip()
+                        if t and t not in all_texts:
+                            all_texts.append(t)
+                    log.warning(f"  '{symbol}' container'da bulunamadı! "
+                                f"Mevcut öğeler: {all_texts[:15]}")
+
+        except Exception as e:
+            log.warning(f"  Custom selectbox yolu başarısız: {e}")
+
+        # ── Yol 2: JS ile gizli <select>'ten seç + widget'ı güncelle ──
+        log.info("  Yol 2: JS ile gizli <select> + _textinput güncelle...")
+        try:
+            result = self.driver.execute_script("""
+                var symbol = arguments[0];
+                var sel = document.getElementById('SelectedStockCode');
+                if (!sel) return { error: 'select bulunamadı' };
+
+                var target = null;
+                for (var i = 0; i < sel.options.length; i++) {
+                    var t = sel.options[i].text.trim().toUpperCase();
+                    var v = sel.options[i].value.toUpperCase();
+                    if (t.indexOf(symbol) === 0 || v.indexOf(symbol) === 0) {
+                        target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                        break;
+                    }
+                }
+                if (!target) {
+                    for (var i = 0; i < sel.options.length; i++) {
+                        var t = sel.options[i].text.trim().toUpperCase();
+                        if (t.indexOf(symbol) >= 0) {
+                            target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                            break;
+                        }
+                    }
+                }
+                if (!target) {
+                    var opts = [];
+                    for (var i = 0; i < Math.min(sel.options.length, 15); i++) {
+                        opts.push(sel.options[i].text.trim());
+                    }
+                    return { error: 'bulunamadı', options: opts };
+                }
+
+                // 1. Gizli <select>'i ayarla
+                sel.selectedIndex = target.index;
+                sel.value = target.value;
+
+                // 2. _textinput ve _input'u güncelle (widget'ın görünen kısımları)
+                var ti = document.getElementById('SelectedStockCode_textinput');
+                var bi = document.getElementById('SelectedStockCode_input');
+                if (ti) { ti.value = target.text; }
+                if (bi) { bi.value = target.value; }
+
+                // 3. Tüm event'leri tetikle
+                var els = [sel, ti, bi].filter(function(e) { return !!e; });
+                ['focus', 'change', 'input', 'blur'].forEach(function(evt) {
+                    els.forEach(function(el) {
+                        el.dispatchEvent(new Event(evt, { bubbles: true }));
+                    });
+                });
+
+                // 4. jQuery trigger
+                if (typeof jQuery !== 'undefined') {
+                    jQuery(sel).val(target.value).trigger('change');
+                    if (ti) jQuery(ti).trigger('change').trigger('blur');
+                    if (bi) jQuery(bi).trigger('change').trigger('blur');
+                    jQuery('#SelectedStockCode_container').hide();
+                }
+
+                return { ok: true, text: target.text, value: target.value };
+            """, symbol_upper)
+
+            if isinstance(result, dict):
+                if result.get("error"):
+                    take_screenshot(self.driver, f"symbol_not_found_{symbol}")
+                    raise Exception(
+                        f"'{symbol}' dropdown'da bulunamadı! "
+                        f"Mevcut: {result.get('options', [])}"
+                    )
+                log.info(f"✅ Hisse seçildi (JS fallback): {result.get('text')} "
+                          f"(value={result.get('value')})")
+            else:
+                log.warning(f"  JS sonucu beklenmeyen: {result}")
+
+        except Exception as e:
+            if "bulunamadı" in str(e) or "dropdown" in str(e):
+                raise
+            log.error(f"  JS fallback hatası: {e}")
+            take_screenshot(self.driver, f"symbol_error_{symbol}")
+            raise
+
+        time.sleep(3)
         take_screenshot(self.driver, f"symbol_selected_{symbol}")
 
 
