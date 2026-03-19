@@ -858,45 +858,65 @@ class TelegramBot:
         try:
             el = self._explore_find_element(selector)
 
-            # <select> elementi ise Select class'ı ile seç
+            # <select> elementi ise tamamen JS ile seç (jQuery change dahil)
             if el.tag_name.lower() == "select":
-                from selenium.webdriver.support.ui import Select as SeleniumSelect
-                sel = SeleniumSelect(el)
-                # Önce visible text ile prefix eşleşmesi dene
-                matched = False
-                for opt in sel.options:
-                    if opt.text.strip().upper().startswith(value.upper()):
-                        sel.select_by_visible_text(opt.text.strip())
-                        matched = True
-                        send_telegram_message(
-                            f"✅ Seçildi: <code>{selector}</code> ← <code>{opt.text.strip()}</code>"
-                        )
-                        break
-                if not matched:
-                    # Contains dene
-                    for opt in sel.options:
-                        if value.upper() in opt.text.strip().upper():
-                            sel.select_by_visible_text(opt.text.strip())
-                            matched = True
-                            send_telegram_message(
-                                f"✅ Seçildi: <code>{selector}</code> ← <code>{opt.text.strip()}</code>"
-                            )
-                            break
-                if not matched:
-                    opts_list = [o.text.strip() for o in sel.options[:15]]
+                result = self.driver.execute_script("""
+                    var sel = arguments[0];
+                    var searchVal = arguments[1].toUpperCase();
+                    var target = null;
+
+                    // Prefix eşleşme → contains eşleşme
+                    for (var i = 0; i < sel.options.length; i++) {
+                        var t = sel.options[i].text.trim().toUpperCase();
+                        var v = sel.options[i].value.toUpperCase();
+                        if (t.indexOf(searchVal) === 0 || v.indexOf(searchVal) === 0) {
+                            target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                            break;
+                        }
+                    }
+                    if (!target) {
+                        for (var i = 0; i < sel.options.length; i++) {
+                            var t = sel.options[i].text.trim().toUpperCase();
+                            if (t.indexOf(searchVal) >= 0) {
+                                target = { index: i, text: sel.options[i].text.trim(), value: sel.options[i].value };
+                                break;
+                            }
+                        }
+                    }
+                    if (!target) {
+                        var opts = [];
+                        for (var i = 0; i < Math.min(sel.options.length, 15); i++) {
+                            opts.push(sel.options[i].text.trim());
+                        }
+                        return { error: true, options: opts };
+                    }
+
+                    // Seçimi yap + tüm event'leri tetikle
+                    sel.selectedIndex = target.index;
+                    sel.value = target.value;
+                    ['focus','change','input','blur'].forEach(function(evt) {
+                        sel.dispatchEvent(new Event(evt, { bubbles: true }));
+                    });
+                    if (typeof jQuery !== 'undefined') {
+                        jQuery(sel).val(target.value).trigger('change').trigger('select2:select');
+                    }
+                    if (typeof $ !== 'undefined' && $ !== jQuery) {
+                        $(sel).val(target.value).trigger('change');
+                    }
+                    return { error: false, text: target.text, value: target.value };
+                """, el, value)
+
+                if result.get("error"):
                     send_telegram_message(
                         f"❌ '{value}' dropdown'da bulunamadı.\n"
-                        f"Mevcut seçenekler: {opts_list}"
+                        f"Mevcut: {result.get('options', [])}"
                     )
                 else:
-                    # jQuery change event tetikle — KuveytTürk AJAX
-                    self.driver.execute_script("""
-                        var el = arguments[0];
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (typeof jQuery !== 'undefined') { jQuery(el).trigger('change'); }
-                        if (typeof $ !== 'undefined') { $(el).trigger('change'); }
-                    """, el)
-                time.sleep(2)
+                    send_telegram_message(
+                        f"✅ Seçildi (JS): <code>{selector}</code> ← "
+                        f"<code>{result['text']}</code>"
+                    )
+                time.sleep(3)
                 take_screenshot(self.driver, "⌨️ Select sonrası")
                 return
 

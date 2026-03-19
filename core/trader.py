@@ -434,61 +434,83 @@ class Trader:
                 continue
 
         if select_el:
-            from selenium.webdriver.support.ui import Select as SeleniumSelect
-            sel = SeleniumSelect(select_el)
+            # Tüm seçenekleri JS ile oku — eşleşen value'yu bul
+            options_data = self.driver.execute_script("""
+                var sel = arguments[0];
+                var result = [];
+                for (var i = 0; i < sel.options.length; i++) {
+                    result.push({
+                        text: sel.options[i].text.trim(),
+                        value: sel.options[i].value,
+                        index: i
+                    });
+                }
+                return result;
+            """, select_el)
 
-            # Tüm seçenekleri listele, symbol ile eşleşeni bul
-            options = [(o.text.strip(), o.get_attribute("value") or "") for o in sel.options]
-            log.info(f"  Dropdown seçenekleri ({len(options)}): {[o[0] for o in options[:10]]}")
+            log.info(f"  Dropdown seçenekleri ({len(options_data)}): "
+                      f"{[o['text'] for o in options_data[:10]]}")
 
-            matched = False
-            for opt_text, opt_val in options:
-                # "ALBRK-E" → "ALBRK" prefix eşleşmesi
-                if opt_text.upper().startswith(symbol_upper) or opt_val.upper().startswith(symbol_upper):
-                    try:
-                        sel.select_by_visible_text(opt_text)
-                    except Exception:
-                        sel.select_by_value(opt_val)
-                    log.info(f"✅ Hisse seçildi: {opt_text} (value={opt_val})")
-                    matched = True
+            # Prefix eşleşme → contains eşleşme
+            target = None
+            for o in options_data:
+                if o["text"].upper().startswith(symbol_upper) or o["value"].upper().startswith(symbol_upper):
+                    target = o
                     break
-
-            if not matched:
-                # Tam eşleşme bulunamadı — contains dene
-                for opt_text, opt_val in options:
-                    if symbol_upper in opt_text.upper():
-                        try:
-                            sel.select_by_visible_text(opt_text)
-                        except Exception:
-                            sel.select_by_value(opt_val)
-                        log.info(f"✅ Hisse seçildi (contains): {opt_text}")
-                        matched = True
+            if not target:
+                for o in options_data:
+                    if symbol_upper in o["text"].upper() or symbol_upper in o["value"].upper():
+                        target = o
                         break
 
-            if not matched:
+            if not target:
                 take_screenshot(self.driver, f"symbol_not_in_dropdown_{symbol}")
                 raise Exception(
                     f"'{symbol}' dropdown'da bulunamadı! "
-                    f"Mevcut seçenekler: {[o[0] for o in options[:15]]}"
+                    f"Mevcut: {[o['text'] for o in options_data[:15]]}"
                 )
 
-            # Seçim sonrası jQuery change event'ini tetikle
-            # KuveytTürk jQuery/AJAX sitesi — select_by_visible_text
-            # Selenium'un native seçimi change event'ini tetiklemeyebilir.
-            # Hem native hem jQuery change event'i gönderiyoruz.
+            # ── Seçimi tamamen JavaScript ile yap ─────────────
+            # Site jQuery event handler'ları kullandığı için
+            # Selenium native select çalışmıyor. Tüm akışı JS ile simüle ediyoruz:
+            #   1. selectedIndex değiştir
+            #   2. Native Event dispatch (change, input)
+            #   3. jQuery .trigger('change') + .change()
+            #   4. Kendo UI widget varsa trigger
             self.driver.execute_script("""
-                var el = arguments[0];
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                if (typeof jQuery !== 'undefined') {
-                    jQuery(el).trigger('change');
-                }
-                if (typeof $ !== 'undefined') {
-                    $(el).trigger('change');
-                }
-            """, select_el)
-            log.info("  change event tetiklendi (native + jQuery)")
+                var sel = arguments[0];
+                var idx = arguments[1];
+                var val = arguments[2];
 
-            # Fiyat tablosunun yüklenmesini bekle
+                // 1. Seçimi yap
+                sel.selectedIndex = idx;
+                sel.value = val;
+
+                // 2. Native events — tüm olasılıkları kapsayacak şekilde
+                var events = ['focus', 'change', 'input', 'blur'];
+                for (var i = 0; i < events.length; i++) {
+                    sel.dispatchEvent(new Event(events[i], { bubbles: true }));
+                }
+
+                // 3. jQuery trigger — birden fazla yolla
+                if (typeof jQuery !== 'undefined') {
+                    jQuery(sel).val(val).trigger('change').trigger('select2:select');
+                }
+                if (typeof $ !== 'undefined' && $ !== jQuery) {
+                    $(sel).val(val).trigger('change');
+                }
+
+                // 4. Kendo UI widget (bazı bankacılık siteleri kullanır)
+                if (typeof kendo !== 'undefined') {
+                    var widget = jQuery(sel).data('kendoDropDownList');
+                    if (widget) { widget.value(val); widget.trigger('change'); }
+                }
+            """, select_el, target["index"], target["value"])
+
+            log.info(f"✅ Hisse seçildi (JS): {target['text']} "
+                      f"(value={target['value']}, index={target['index']})")
+
+            # Fiyat tablosunun AJAX ile yüklenmesini bekle
             time.sleep(3)
             take_screenshot(self.driver, f"symbol_selected_{symbol}")
             return
